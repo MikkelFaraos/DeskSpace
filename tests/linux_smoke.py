@@ -105,7 +105,8 @@ def steps():
     pump(4)
     check(len(panels) == 8, f"every kind of panel opened: {sorted(panels)}")
     check(all(f.isVisible() for f in app.fences), "all fences are on screen")
-    check(panels["folder"].list.count() >= 1, "folder fence listed its files")
+    work = next(f for f in app.fences if f.name == "Work")
+    check(work.list.count() == 1, "folder fence listed its files")
     state = window_state(app.fences[0])
     log.append("     window manager state: " + " | ".join(l for l in state.splitlines() if "_NET_WM_STATE" in l
                                                          or "WINDOW_TYPE" in l))
@@ -224,6 +225,13 @@ def steps():
     check(all(p.isVisible() and p.scale > 1 for p in pets), "pets are big on the console")
     check([g["name"] for g in c.games] == ["Stardew Valley"], "console lists the Steam game")
     shot("05_console")
+    # With one game, the strip above the bottom bar is plain dark background, so anything bright
+    # really on the screen there is a pet. (A test that only asked Qt was fooled once already.)
+    image = qt.primaryScreen().grabWindow(0).toImage()
+    top = c.y() + int(c.bar_top())
+    bright = sum(image.pixelColor(x, y).lightness() > 90 for x in range(0, image.width(), 3)
+                 for y in range(top - 60, top - 4, 3))
+    check(bright > 60, f"pets really are on the console screen: {bright} bright samples")
 
     def key(k):
         c.keyPressEvent(QKeyEvent(QEvent.KeyPress, k, Qt.NoModifier))
@@ -261,7 +269,8 @@ def steps():
     app.exit_console()
     pump(1)
     check(all(f.isVisible() for f in app.fences if f.shown), "exit: fences are back")
-    check(all(p.scale == 1 for p in pets), "exit: pets are back to size")
+    check(all(p.scale == 1 and p.parent() is None and p.isWindow() for p in pets), "exit: pets are back to size")
+    check(all(p.isVisible() for p in pets), "exit: pets are back on the desktop")
     shot("07_back_on_desktop")
     app.save()
     saved = json.loads((data / "config.json").read_text())

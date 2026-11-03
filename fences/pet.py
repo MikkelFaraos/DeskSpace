@@ -16,7 +16,7 @@ import time
 from ctypes import wintypes
 from datetime import date
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
@@ -402,12 +402,15 @@ class Ball(DesktopThing):
 
 
 class Pet(QWidget):
+    FLAGS = Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnBottomHint
+
     def __init__(self, app, info):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnBottomHint)
+        super().__init__(None, self.FLAGS)
         self.app = app
         self.info = info  # {"kind", "color", "name"}: the pet's entry in the app's pet list, edited in place
         self.scale = 1.0
         self.stage = None  # the Console mode window we're on, instead of the desktop
+        self.origin = QPoint(0, 0)  # where our window coordinates start: the screen, or the console
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(W, H)
         screen = QApplication.primaryScreen().availableGeometry()
@@ -439,8 +442,6 @@ class Pet(QWidget):
         if self.stage:  # an owned window stays above its owner, and hides when that's minimized
             if IS_WINDOWS:
                 user32.SetWindowLongPtrW(int(self.winId()), -8, self.stage)
-            else:
-                self.windowHandle().setTransientParent(self.app.console.windowHandle())
             self.lift()  # owning doesn't move it: Qt opened us at the bottom of the stack
         else:
             pin_to_desktop(int(self.winId()))
@@ -451,9 +452,18 @@ class Pet(QWidget):
     def set_stage(self, hwnd, scale, floor):
         """Move onto the Console mode window at this size (hwnd None: back to the desktop)."""
         self.stage, self.scale = hwnd, scale
-        # Stays-on-bottom forces the window down on every move, and Windows then drags its owner
-        # down with it: left on, it sinks the whole console below every other window.
-        self.setWindowFlag(Qt.WindowStaysOnBottomHint, not hwnd)
+        if IS_WINDOWS:
+            # Stays-on-bottom forces the window down on every move, and Windows then drags its owner
+            # down with it: left on, it sinks the whole console below every other window.
+            self.setWindowFlag(Qt.WindowStaysOnBottomHint, not hwnd)
+        elif hwnd:  # window managers stack full-screen windows over everything, so draw inside it
+            self.setParent(self.app.console)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.origin = self.app.console.pos()
+        else:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            self.setParent(None, self.FLAGS)
+            self.origin = QPoint(0, 0)
         self.resize(int(W * scale), int(H * scale))
         self.fy = float(floor)
         self.vx, self.vy = 0.0, 0.0
@@ -496,7 +506,8 @@ class Pet(QWidget):
             self.raise_()
 
     def place(self):
-        self.move(int(self.fx - FOOT.x() * self.scale), int(self.fy - FOOT.y() * self.scale))
+        self.move(int(self.fx - FOOT.x() * self.scale) - self.origin.x(),
+                  int(self.fy - FOOT.y() * self.scale) - self.origin.y())
         if self.bubble is not None:
             sp = self.spec()
             top = self.fy - (sp["legs"] + sp["body"][1] + sp["heart"] + 8) * self.scale

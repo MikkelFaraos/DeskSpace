@@ -118,7 +118,8 @@ class SettingsWindow(QWidget):
         boxes = []
 
         box, form = group("Startup && behaviour")
-        form.addRow(checkbox("Start DeskSpace with Windows", app.startup_enabled(), app.set_startup))
+        form.addRow(checkbox(f"Start DeskSpace with {'Windows' if IS_WINDOWS else 'the desktop'}", app.startup_enabled(),
+                             app.set_startup))
         form.addRow(checkbox("Lock fence positions and sizes", app.locked, lambda on: app.set_option("locked", on)))
         snap_row = QHBoxLayout()
         distance = QSpinBox()
@@ -167,16 +168,20 @@ class SettingsWindow(QWidget):
         enabled = checkbox("Open quick search with a keyboard shortcut:", app.search_enabled,
                            lambda on: (app.set_option("search_enabled", on), keys.setEnabled(on), apply_hotkey()))
         keys.setEnabled(app.search_enabled)
-        row = QHBoxLayout()
-        row.addWidget(enabled)
-        row.addWidget(keys)
-        row.addStretch(1)
-        form.addRow(row)
-        form.addRow(status)
-        form.addRow(hint("Finds apps, fence items, desktop items and files. Enter opens, Ctrl+Enter shows it in "
-                         "Explorer, Esc closes. Needs a modifier like Ctrl, Alt or Shift."))
-        if app.search_enabled and not app.hotkey.registered:
-            status.setText("That shortcut is already used by another program - try a different one.")
+        if IS_WINDOWS:
+            row = QHBoxLayout()
+            row.addWidget(enabled)
+            row.addWidget(keys)
+            row.addStretch(1)
+            form.addRow(row)
+            form.addRow(status)
+            form.addRow(hint("Finds apps, fence items, desktop items and files. Enter opens, Ctrl+Enter shows it in "
+                             "Explorer, Esc closes. Needs a modifier like Ctrl, Alt or Shift."))
+            if app.search_enabled and not app.hotkey.registered:
+                status.setText("That shortcut is already used by another program - try a different one.")
+        else:
+            form.addRow(hint("Open it from the tray icon. It finds apps, fence items, desktop items and files. "
+                             "Enter opens, Ctrl+Enter shows it in the file manager, Esc closes."))
         boxes.append(box)
 
         box, form = group("Desktop pets")

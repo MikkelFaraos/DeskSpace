@@ -232,9 +232,10 @@ class NetworkView(QWidget):
         y += 22
         p.setFont(font(11))
         p.setPen(QColor(255, 255, 255, 110))
+        line = (f"IP {stats.ip.value or '–'}   ·   session ↓ {fmt_bytes(stats.session[0])}  "
+                f"↑ {fmt_bytes(stats.session[1])}")
         p.drawText(QRectF(8, y, w - 16, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"IP {stats.ip.value or '–'}   ·   this session ↓ {fmt_bytes(stats.session[0])}  "
-                   f"↑ {fmt_bytes(stats.session[1])}")
+                   QFontMetrics(p.font()).elidedText(line, Qt.ElideMiddle, int(w - 16)))
 
 
 class NetworkFence(Panel):
