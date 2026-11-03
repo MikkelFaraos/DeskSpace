@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from . import dialogs
 from .common import EDIT_STYLE, LIST_STYLE
 from .panel import Panel
+from .system import open_path
 
 CARRIERS = {
     "postnord": ("PostNord", "https://www.postnord.dk/varktojer/track-trace?shipmentId={}"),
@@ -267,8 +268,7 @@ class PackageFence(Panel):
     # -- actions
 
     def open_page(self, pkg):
-        import os
-        os.startfile(tracking_url(pkg))
+        open_path(tracking_url(pkg))
 
     def item_menu(self, pos):
         item = self.list.itemAt(pos)

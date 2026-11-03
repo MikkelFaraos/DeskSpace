@@ -2,7 +2,6 @@
 items and Start-menu apps instantly, files from the Windows search index in the background, and
 offers a web search as the last resort."""
 import os
-import subprocess
 import urllib.parse
 from pathlib import Path
 
@@ -15,12 +14,18 @@ from PySide6.QtWidgets import (
 
 from .common import DESKTOP, PUBLIC_DESKTOP, display_name, is_hidden
 from .dialogs import bring_to_front
-from .win32 import shell_icon, user32
+from .system import IS_WINDOWS, open_path, run_output, shell_icon, show_in_folder, user32
 
 WM_HOTKEY = 0x0312
 MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
-START_MENUS = [Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
-               Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Microsoft" / "Windows" / "Start Menu" / "Programs"]
+if IS_WINDOWS:
+    START_MENUS = [Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Start Menu" / "Programs",
+                   Path(os.environ.get("PROGRAMDATA", r"C:\ProgramData")) / "Microsoft" / "Windows" / "Start Menu"
+                   / "Programs"]
+else:
+    START_MENUS = [Path.home() / ".local/share/applications", Path("/usr/share/applications"),
+                   Path("/var/lib/flatpak/exports/share/applications"), Path("/var/lib/snapd/desktop/applications")]
+APP_FILES = (".lnk", ".url") if IS_WINDOWS else (".desktop",)
 ROLE_SUB, ROLE_ACTION = Qt.UserRole + 1, Qt.UserRole + 2
 
 
@@ -68,6 +73,8 @@ class HotkeyListener(QWidget):
             self.registered = False
 
     def nativeEvent(self, event_type, message):
+        if not IS_WINDOWS:
+            return False, 0
         from ctypes import wintypes
         msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_HOTKEY:
@@ -84,6 +91,11 @@ class IndexSearcher(QObject):
         self.conn = None
 
     def search(self, seq, text):
+        if not IS_WINDOWS:  # locate's index, where it's installed; only files in your home folder
+            lines = run_output("locate", "-i", "-l", "40", "--", text).splitlines()
+            home = str(Path.home())
+            self.results.emit(seq, [p for p in lines if p.startswith(home + "/") and "/." not in p[len(home):]][:12])
+            return
         try:
             import pythoncom
             import win32com.client
@@ -230,7 +242,7 @@ class SearchPopup(QWidget):
         for root in START_MENUS:
             if root.is_dir():
                 for p in root.rglob("*"):
-                    if p.suffix.lower() in (".lnk", ".url") and "uninstall" not in p.name.lower():
+                    if p.suffix.lower() in APP_FILES and "uninstall" not in p.name.lower():
                         add(p, "App")
         for panel in self.app.all_panels():
             items.append((panel.name, "Fence / widget - show it", ("panel", panel)))
@@ -294,9 +306,9 @@ class SearchPopup(QWidget):
         target = item.data(ROLE_ACTION)
         self.hide()
         if isinstance(target, str):
-            os.startfile(target)
+            open_path(target)
         elif target[0] == "web":
-            os.startfile("https://www.google.com/search?q=" + urllib.parse.quote(target[1]))
+            open_path("https://www.google.com/search?q=" + urllib.parse.quote(target[1]))
         elif target[0] == "panel":
             self.app.reveal_panel(target[1])
 
@@ -305,7 +317,7 @@ class SearchPopup(QWidget):
         target = item.data(ROLE_ACTION) if item else None
         if isinstance(target, str):
             self.hide()
-            subprocess.Popen(f'explorer /select,"{target}"')
+            show_in_folder(target)
 
     # -- keyboard / focus
 

@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QGuiApplication, QPainter
 from PySide6.QtWidgets import QWidget
 
 from .sysinfo import fmt_bytes
-from .win32 import shell_thumbnail
+from .system import shell_thumbnail
 
 TEXT_TYPES = {".txt", ".md", ".csv", ".log", ".json", ".ini", ".cfg", ".py", ".xml", ".yaml", ".yml", ".bat",
               ".ps1"}

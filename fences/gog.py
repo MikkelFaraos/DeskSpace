@@ -9,12 +9,15 @@ import json
 import os
 import re
 import subprocess
-import winreg
 from pathlib import Path
 
 import psutil
 
 from .common import COVER_CACHE
+from .system import IS_WINDOWS
+
+if IS_WINDOWS:
+    import winreg
 
 GAMES_KEY = r"SOFTWARE\WOW6432Node\GOG.com\Games"
 GALAXY_KEY = r"SOFTWARE\WOW6432Node\GOG.com\GalaxyClient\paths"
@@ -30,6 +33,8 @@ def _value(key, name):
 
 
 def galaxy_exe():
+    if not IS_WINDOWS:
+        return None
     try:
         with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, GALAXY_KEY) as key:
             exe = Path(_value(key, "client")) / "GalaxyClient.exe"
@@ -55,6 +60,8 @@ def _primary_task(folder, game_id):
 def installed_games():
     """[{"id", "name", "folder", "exe", "args", "workdir"}] for installed GOG games, sorted by name."""
     games = {}
+    if not IS_WINDOWS:
+        return []
     try:
         root = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, GAMES_KEY)
     except OSError:

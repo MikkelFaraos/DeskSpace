@@ -1,7 +1,5 @@
 """Icon fences: an owned fence keeps its items in its own folder under DeskSpace; a folder
 portal shows any existing folder (like Downloads) without moving anything."""
-import os
-import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QFileInfo, QFileSystemWatcher, QMimeData, QRect, QRectF, QSize, Qt, QTimer, QUrl
@@ -16,7 +14,7 @@ from .common import (
     unique_path,
 )
 from .panel import Panel
-from .win32 import shell_icon
+from .system import FILE_MANAGER, IS_WINDOWS, open_path, shell_icon, show_in_folder
 
 TILE = QSize(104, 156)  # 2:3, the shape of Steam's library covers
 
@@ -45,7 +43,7 @@ class FenceList(QListWidget):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setStyleSheet(LIST_STYLE)
         self.setMouseTracking(True)
-        self.itemActivated.connect(lambda it: os.startfile(it.data(Qt.UserRole)))
+        self.itemActivated.connect(lambda it: open_path(it.data(Qt.UserRole)))
 
     # -- hover previews (icon view only; game tiles already are pictures)
 
@@ -108,8 +106,8 @@ class FenceList(QListWidget):
                 self.clearSelection()
                 item.setSelected(True)
             paths = self.selected_paths()
-            menu.addAction("Open", lambda: [os.startfile(p) for p in paths])
-            menu.addAction("Show in Explorer", lambda: subprocess.Popen(f'explorer /select,"{paths[0]}"'))
+            menu.addAction("Open", lambda: [open_path(p) for p in paths])
+            menu.addAction(f"Show in {FILE_MANAGER}", lambda: show_in_folder(paths[0]))
             menu.addAction("Move to desktop", lambda: self.fence.move_out(paths, DESKTOP))
             others = [f for f in self.fence.app.folder_fences() if f is not self.fence]
             if others:
@@ -306,7 +304,7 @@ class FolderFence(Panel):
         path = QLineEdit(str(self.folder))
         path.setReadOnly(True)
         folder_row.addWidget(path, 1)
-        folder_row.addWidget(button("Open", lambda: os.startfile(self.folder)))
+        folder_row.addWidget(button("Open", lambda: open_path(self.folder)))
         if self.portal:
             def change():
                 chosen = dialogs.get_folder("Choose a folder to show", self.folder)
@@ -334,7 +332,8 @@ class FolderFence(Panel):
         form.addRow("", hint)
         if steam.steam_root():
             form.addRow("Steam", button("Add installed Steam games", self.add_steam_games))
-        form.addRow("GOG", button("Add installed GOG games", self.add_gog_games))
+        if IS_WINDOWS:  # GOG Galaxy and its registry entries only exist there
+            form.addRow("GOG", button("Add installed GOG games", self.add_gog_games))
 
     def remove_label(self):
         return "Remove portal (files stay)" if self.portal else "Remove fence (items go back to desktop)"

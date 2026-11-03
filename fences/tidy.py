@@ -24,6 +24,7 @@ from . import dialogs
 from .common import APP_NAME, CATEGORIES, DATA_ROOT, is_hidden, make_app_icon, unique_path
 from .dialogs import bring_to_front
 from .sysinfo import fmt_bytes
+from .system import IS_WINDOWS, user_dir
 
 DAY = 86400
 DOWNLOADS = Path.home() / "Downloads"
@@ -36,6 +37,8 @@ SORT_FOLDERS = set(FOLDERS.values())
 
 
 def screenshots_dir():
+    if not IS_WINDOWS:
+        return user_dir("PICTURES", "Pictures") / "Screenshots"
     import ctypes
     from ctypes import wintypes
 

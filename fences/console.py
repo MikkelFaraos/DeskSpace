@@ -7,6 +7,7 @@ back by itself, and holding Back + Start brings it back at any time.
 """
 import ctypes
 import os
+import struct
 import subprocess
 import time
 from ctypes import wintypes
@@ -20,7 +21,7 @@ from . import gog, pet, steam
 from .common import ACCENT, APP_NAME
 from .dialogs import bring_to_front
 from .folder import make_tile
-from .win32 import user32
+from .system import IS_WINDOWS, linux_get_volume, linux_set_volume, open_path, run_output, user32
 
 WHITE = QColor(255, 255, 255, 240)
 DIM = QColor(255, 255, 255, 150)
@@ -43,7 +44,7 @@ def load_games():
 
 def launch(game):
     if game["source"] == "Steam":
-        os.startfile(f"steam://rungameid/{game['id']}")
+        open_path(f"steam://rungameid/{game['id']}")
     else:
         gog.run_game(game["game"])
 
@@ -107,6 +108,8 @@ def _endpoint_volume():
 
 def get_volume():
     """(level 0..1, muted), or None if there are no speakers."""
+    if not IS_WINDOWS:
+        return linux_get_volume()
     volume = _endpoint_volume()
     if not volume:
         return None
@@ -120,6 +123,9 @@ def get_volume():
 
 
 def set_volume(level):
+    if not IS_WINDOWS:
+        linux_set_volume(level)
+        return
     volume = _endpoint_volume()
     if volume:
         try:
@@ -142,6 +148,9 @@ def enable_shutdown_privilege():
 
 
 def sleep_pc():
+    if not IS_WINDOWS:
+        subprocess.Popen(["systemctl", "suspend"])
+        return
     enable_shutdown_privilege()
     if not ctypes.windll.powrprof.SetSuspendState(False, False, False):
         # PCs with Modern Standby can't be told to sleep this way, but do once the screen goes off.
@@ -149,11 +158,13 @@ def sleep_pc():
 
 
 def restart_pc():
-    subprocess.Popen(["shutdown", "/r", "/t", "0"], creationflags=0x08000000)
+    subprocess.Popen(["shutdown", "/r", "/t", "0"] if IS_WINDOWS else ["systemctl", "reboot"],
+                     creationflags=0x08000000 if IS_WINDOWS else 0)
 
 
 def shutdown_pc():
-    subprocess.Popen(["shutdown", "/s", "/t", "0"], creationflags=0x08000000)
+    subprocess.Popen(["shutdown", "/s", "/t", "0"] if IS_WINDOWS else ["systemctl", "poweroff"],
+                     creationflags=0x08000000 if IS_WINDOWS else 0)
 
 
 # -- controller
@@ -177,6 +188,52 @@ STICK = 16000
 REPEAT_FIRST, REPEAT_NEXT = 0.38, 0.11
 
 
+class LinuxJoystick:
+    """The kernel's joystick device: reads the controller's button and stick changes as they arrive.
+    Button and axis numbers are the ones Xbox-style controllers get from Linux's xpad driver."""
+    BUTTONS = {0: A, 1: B, 2: X, 3: Y, 4: LB, 5: RB, 6: BACK, 7: START}
+    EVENT = struct.Struct("IhBB")  # time, value, type, number
+    PATH = "/dev/input/js{}"
+
+    def __init__(self):
+        self.file = None
+        self.buttons = 0
+        self.axes = {}
+
+    def connect(self):
+        for i in range(4):
+            try:
+                self.file = os.open(self.PATH.format(i), os.O_RDONLY | os.O_NONBLOCK)
+                self.buttons, self.axes = 0, {}
+                return True
+            except OSError:
+                continue
+        return False
+
+    def read(self):
+        """The buttons held now, or None once the controller is gone."""
+        while True:
+            try:
+                data = os.read(self.file, self.EVENT.size)
+            except BlockingIOError:
+                break
+            except OSError:
+                data = b""
+            if len(data) < self.EVENT.size:
+                os.close(self.file)
+                self.file = None
+                return None
+            _, value, kind, number = self.EVENT.unpack(data)
+            kind &= 0x7f  # without the "initial state" flag
+            if kind == 1 and number in self.BUTTONS:
+                self.buttons = self.buttons | self.BUTTONS[number] if value else self.buttons & ~self.BUTTONS[number]
+            elif kind == 2:
+                self.axes[number] = value
+        lx, ly, hat_x, hat_y = (self.axes.get(n, 0) for n in (0, 1, 6, 7))
+        held = self.buttons | (LEFT if lx < -STICK or hat_x < 0 else 0) | (RIGHT if lx > STICK or hat_x > 0 else 0)
+        return held | (UP if ly < -STICK or hat_y < 0 else 0) | (DOWN if ly > STICK or hat_y > 0 else 0)
+
+
 class Gamepad(QObject):
     """Polls the first connected Xbox-style controller."""
     action = Signal(str)
@@ -185,7 +242,8 @@ class Gamepad(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.xinput = None
-        for name in ("xinput1_4", "xinput9_1_0"):
+        self.joystick = None if IS_WINDOWS else LinuxJoystick()
+        for name in ("xinput1_4", "xinput9_1_0") if IS_WINDOWS else ():
             try:
                 self.xinput = getattr(ctypes.windll, name)
                 break
@@ -196,10 +254,11 @@ class Gamepad(QObject):
         self.last = 0
         self.held_since = {}
         self.chord_since = None
+        self.last_awake = 0.0
         self.timer = QTimer(self, interval=25, timeout=self.poll)
 
     def start(self):
-        if self.xinput:
+        if self.xinput or self.joystick:
             self.timer.start()
 
     def read(self, slot):
@@ -214,7 +273,23 @@ class Gamepad(QObject):
         self.next_scan = now + 2
         return next((i for i in range(4) if self.read(i)), None)
 
+    def poll_linux(self):
+        js = self.joystick
+        if js.file is None:
+            now = time.monotonic()
+            if now < self.next_scan or not js.connect():
+                self.next_scan = max(self.next_scan, now + 2) if now >= self.next_scan else self.next_scan
+                return
+        buttons = js.read()
+        if buttons is None:
+            self.last, self.held_since, self.chord_since = 0, {}, None
+            return
+        self.handle(buttons, time.monotonic())
+
     def poll(self):
+        if not IS_WINDOWS:
+            self.poll_linux()
+            return
         if self.slot is None:
             self.slot = self.find()
             if self.slot is None:
@@ -230,10 +305,18 @@ class Gamepad(QObject):
         buttons |= (LEFT if pad.sThumbLX < -STICK else 0) | (RIGHT if pad.sThumbLX > STICK else 0)
         self.handle(buttons, time.monotonic())
 
+    def keep_awake(self, now):
+        """Controllers don't count as input to the system, so keep the TV and PC awake ourselves."""
+        if IS_WINDOWS:
+            ctypes.windll.kernel32.SetThreadExecutionState(0x3)
+        elif now - self.last_awake > 30:
+            self.last_awake = now
+            run_output("xdg-screensaver", "reset")
+
     def handle(self, buttons, now):
         if buttons:
             pet.pad_activity = now
-            ctypes.windll.kernel32.SetThreadExecutionState(0x3)  # keep the TV and PC awake while you use it
+            self.keep_awake(now)
         if buttons & BACK and buttons & START:
             if self.chord_since is None:
                 self.chord_since = now

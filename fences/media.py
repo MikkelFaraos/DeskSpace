@@ -3,6 +3,9 @@ Windows' own media session API - the one behind the volume flyout and lock scree
 import asyncio
 import datetime
 import threading
+import time
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from PySide6.QtCore import QObject, QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPixmap, QPolygonF
@@ -10,6 +13,7 @@ from PySide6.QtWidgets import QWidget
 
 from .common import ACCENT
 from .panel import Panel
+from .system import IS_WINDOWS, run_output
 
 PLAYING = 4  # GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
 
@@ -21,6 +25,16 @@ def app_label(app_id):
         name = name[:-4]
     name = name.split(".")[-1] if "." in name else name
     return {"msedge": "Edge", "chrome": "Chrome", "firefox": "Firefox", "ZuneMusic": "Media Player"}.get(name, name)
+
+
+def read_art(url):
+    """Album art from a player's file:// address; players without one just show none."""
+    if not url.startswith("file://"):
+        return b""
+    try:
+        return Path(unquote(urlparse(url).path)).read_bytes()
+    except OSError:
+        return b""
 
 
 class MediaBackend(QObject):
@@ -37,8 +51,27 @@ class MediaBackend(QObject):
         if self.running:
             return
         self.running = True
-        self.thread = threading.Thread(target=lambda: asyncio.run(self.main()), daemon=True)
+        target = (lambda: asyncio.run(self.main())) if IS_WINDOWS else self.linux_loop
+        self.thread = threading.Thread(target=target, daemon=True)
         self.thread.start()
+
+    def linux_loop(self):
+        """Linux players publish what they're doing over MPRIS; playerctl reads it for us."""
+        fields = "\t".join("{{%s}}" % f for f in ("status", "title", "artist", "playerName", "position", "mpris:length",
+                                                   "mpris:artUrl"))
+        last_url, art = None, b""
+        while self.running:
+            parts = run_output("playerctl", "metadata", "--format", fields).rstrip("\n").split("\t")
+            if len(parts) == 7 and parts[0] in ("Playing", "Paused"):
+                status, title, artist, player, position, length, url = parts
+                if url != last_url:
+                    last_url, art = url, read_art(url)
+                self.updated.emit({"title": title, "artist": artist, "app": player.title(), "playing": status == "Playing",
+                                   "art": art, "position": int(position or 0) / 1e6, "duration": int(length or 0) / 1e6,
+                                   "updated": datetime.datetime.now(datetime.timezone.utc)})
+            else:
+                self.updated.emit(None)
+            time.sleep(1)
 
     def stop(self):
         self.running = False
@@ -88,6 +121,9 @@ class MediaBackend(QObject):
             return b""
 
     def command(self, name):
+        if not IS_WINDOWS:
+            run_output("playerctl", {"toggle": "play-pause", "next": "next", "prev": "previous"}[name])
+            return
         if self.loop is None:
             return
 

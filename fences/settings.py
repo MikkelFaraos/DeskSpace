@@ -1,6 +1,5 @@
 """The Settings window: app-wide options on a General page, plus one page per fence/widget.
 Changes apply immediately; there's nothing to save or cancel."""
-import os
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QKeySequence
@@ -13,6 +12,7 @@ from . import dialogs
 from .common import APP_NAME, DATA_ROOT, make_app_icon
 from .dialogs import bring_to_front
 from .pet import PALETTES, SPECIES
+from .system import IS_WINDOWS, open_path
 
 MAX_PETS = 8
 GENERAL = object()  # selects the General page (its entry in the list is None)
@@ -135,12 +135,13 @@ class SettingsWindow(QWidget):
         form.addRow(snap_row)
         boxes.append(box)
 
-        box, form = group("Quick-hide")
+        box, form = group("Quick-hide" if IS_WINDOWS else "Hide all fences")
         icons = checkbox("Also hide the desktop icons", app.hide_icons, lambda on: app.set_option("hide_icons", on))
         icons.setEnabled(app.quick_hide)
-        form.addRow(checkbox("Double-click an empty spot on the desktop to hide/show all fences", app.quick_hide,
-                             lambda on: (app.set_option("quick_hide", on), icons.setEnabled(on))))
-        form.addRow(icons)
+        if IS_WINDOWS:
+            form.addRow(checkbox("Double-click an empty spot on the desktop to hide/show all fences", app.quick_hide,
+                                 lambda on: (app.set_option("quick_hide", on), icons.setEnabled(on))))
+            form.addRow(icons)
         form.addRow(hint("You can also double-click the tray icon."))
         boxes.append(box)
 
@@ -256,7 +257,7 @@ class SettingsWindow(QWidget):
         auto.clicked.connect(app.auto_sort)
         actions.addWidget(auto)
         data = QPushButton("Open data folder")
-        data.clicked.connect(lambda: os.startfile(DATA_ROOT))
+        data.clicked.connect(lambda: open_path(DATA_ROOT))
         actions.addWidget(data)
         actions.addStretch(1)
         form.addRow(actions)

@@ -1,0 +1,36 @@
+# Runs DeskSpace on real Ubuntu with a virtual screen and a window manager, and keeps screenshots.
+name: Linux test
+
+on:
+  push:
+    branches: [linux, main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: System packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb openbox x11-utils x11-apps libxcb-cursor0 libxkbcommon-x11-0 libegl1 \
+            libxcb-icccm4 libxcb-keysyms1 libxcb-shape0 libxcb-xinerama0 libxcb-image0 libxcb-render-util0 \
+            libdbus-1-3 libgl1 fonts-dejavu-core shared-mime-info
+      - name: Python libraries
+        run: pip install -r build/requirements-linux.txt
+      - name: Installer script's Python check
+        run: bash -n build/install-linux.sh
+      - name: Run the app
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c \
+            'openbox & sleep 2; python tests/linux_smoke.py screenshots'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: screenshots

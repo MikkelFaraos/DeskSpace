@@ -2,6 +2,7 @@
 (Qt, HTTPS, the WinRT media API, pywin32/COM, calendar parsing...) without starting the app.
 Writes one line per check to the report and returns 0 when all pass."""
 import importlib
+import sys
 import traceback
 
 
@@ -57,8 +58,10 @@ def run(report_path):
         for name in ("settings", "tidy", "cleanup", "console"):  # ...except the windows it opens on demand
             importlib.import_module(f"fences.{name}")
 
-    for name, func in (("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Media session API", media),
-                       ("COM / Windows Search", com), ("Calendar parsing", calendar), ("GPU counters", stats)):
+    checks = [("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Calendar parsing", calendar)]
+    if sys.platform == "win32":
+        checks += [("Media session API", media), ("COM / Windows Search", com), ("GPU counters", stats)]
+    for name, func in checks:
         check(name, func)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(results) + "\n")
