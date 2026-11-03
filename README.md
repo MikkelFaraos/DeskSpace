@@ -2,7 +2,7 @@
 
 Translucent fences and widgets for the Windows desktop. Sort your icons into fences, keep notes, a calendar and system stats on the desktop, launch your games from cover art, and share it all with a few small animals that wander along the tops of your fences.
 
-Everything sits at desktop level, so it never covers your apps. Current version: **1.3.0**. Built with Python and PySide6, and developed and tested on Windows 11.
+Everything sits at desktop level, so it never covers your apps. Current version: **1.4.0**. Built with Python and PySide6. Developed and tested on Windows 11, with a [Linux version](#linux) for Ubuntu and Linux Mint.
 
 ## Features
 
@@ -94,6 +94,24 @@ To run it without installing:
 ```powershell
 .venv\Scripts\pythonw.exe deskspace.pyw
 ```
+
+## Linux
+
+DeskSpace also runs on Ubuntu, Linux Mint and other apt-based systems. In the project folder:
+
+```bash
+bash build/install-linux.sh
+```
+
+It asks for your password to install a few system packages, then installs the app for your user in `~/.local/share/deskspace` and starts it. To remove it, run the same script with `--uninstall`. Your data in `~/DeskSpace` is kept.
+
+The Linux version has been tested automatically on Ubuntu with a basic window manager, but not yet by hand on the full Ubuntu or Mint desktops. It differs from Windows in a few ways:
+
+- **Fences** stay behind other windows, but "Show desktop" may hide them, and they may stay on one workspace.
+- **Not available:** double-clicking the desktop to hide fences, hiding the desktop icons, the global search shortcut, GOG games, and GPU load and VRAM. Use the tray icon to hide fences and open search.
+- **File previews** cover image files only.
+- **File search** needs `locate`, media controls need `playerctl`, and battery levels need `upower`. The install script adds all three.
+- **Console mode** reads Xbox-style controllers through the Linux joystick driver.
 
 ## Getting started
 

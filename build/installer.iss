@@ -1,4 +1,4 @@
-﻿; Inno Setup script for DeskSpace. Built by build\build.ps1 (needs Inno Setup 6).
+; Inno Setup script for DeskSpace. Built by build\build.ps1 (needs Inno Setup 6).
 ;
 ; Installs per user (no admin prompt) into %LOCALAPPDATA%\Programs\DeskSpace:
 ;   runtime\   official PSF-signed embeddable Python + libraries; DeskSpace.exe is a renamed copy of the
@@ -13,7 +13,7 @@
 
 #define AppName "DeskSpace"
 #define OldName "DeskFences"
-#define AppVersion "1.3.0"
+#define AppVersion "1.4.0"
 #define Launcher "{app}\runtime\DeskSpace.exe"
 #define Script "{app}\app\deskspace.pyw"
 
