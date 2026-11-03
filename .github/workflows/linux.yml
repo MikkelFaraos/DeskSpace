@@ -33,11 +33,11 @@ jobs:
             test -x ~/.local/bin/deskspace
             test -f ~/.local/share/applications/deskspace.desktop
             test -f ~/.local/share/icons/hicolor/256x256/apps/deskspace.png
-            pgrep -f deskspace.pyw
+            pgrep -f "[v]env/bin/python.*deskspace.pyw"
             test -f ~/.config/autostart/deskspace.desktop
             bash build/install-linux.sh --uninstall
             sleep 1
-            ! pgrep -f "share/deskspace/app/deskspace.pyw"
+            if pgrep -f "[v]env/bin/python.*deskspace.pyw"; then exit 1; fi
             test ! -e ~/.local/bin/deskspace
             test -d ~/DeskSpace
           '
