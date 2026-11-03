@@ -1,0 +1,14 @@
+# Libraries bundled into the installed app's runtime. Pinned to the versions the dev setup runs,
+# so the installed files are byte-identical to ones Windows (Smart App Control) already trusts.
+# Only Qt's Essentials: the app uses QtCore/QtGui/QtWidgets/QtNetwork, not Addons/WebEngine.
+PySide6_Essentials==6.12.0
+psutil==7.2.2
+pywin32==312
+icalendar==7.3.0
+recurring-ical-events==3.8.2
+Send2Trash==2.1.0
+winrt-runtime==4.0.3
+winrt-Windows.Foundation==4!10.0.28000.2705
+winrt-Windows.Foundation.Collections==4!10.0.28000.2705
+winrt-Windows.Media.Control==4!10.0.28000.2705
+winrt-Windows.Storage.Streams==4!10.0.28000.2705

@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Build output and downloads (recreated by build\build.ps1)
+dist/
+build/cache/
+
+# Local shortcuts
+*.lnk
