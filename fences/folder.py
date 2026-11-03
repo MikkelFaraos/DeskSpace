@@ -151,7 +151,11 @@ def make_tile(name, dpr, cover=None, header=None, icon=None):
         font.setBold(True)
         p.setFont(font)
         p.setPen(QColor(255, 255, 255, 230))
-        p.drawText(QRectF(6, text_top, w - 12, h - text_top - 6), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, name)
+        if art.isNull() and not icon:  # nothing but the name: give it the whole card
+            p.drawText(QRectF(8, 8, w - 16, h - 16), Qt.AlignCenter | Qt.TextWordWrap, name)
+        else:
+            p.drawText(QRectF(6, text_top, w - 12, h - text_top - 6), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap,
+                       name)
     p.end()
     return pm
 

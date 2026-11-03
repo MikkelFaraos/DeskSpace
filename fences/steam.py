@@ -43,6 +43,20 @@ def library_dirs():
 
 def installed_games():
     """[(appid, name)] of installed Steam games, sorted by name."""
+    return [(appid, name) for appid, name, _ in library()]
+
+
+def running_game():
+    """The app id Steam is running right now, or None."""
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            return str(winreg.QueryValueEx(key, "RunningAppID")[0] or "") or None
+    except OSError:
+        return None
+
+
+def library():
+    """[(appid, name, last played time)] of installed Steam games, sorted by name."""
     games = {}
     for lib in library_dirs():
         for manifest in lib.glob("appmanifest_*.acf"):
@@ -57,8 +71,9 @@ def installed_games():
             appid, name = appid.group(1), name.group(1)
             if appid in NOT_GAMES or any(w in name.lower() for w in NOT_GAME_WORDS):
                 continue
-            games[appid] = name
-    return sorted(games.items(), key=lambda g: g[1].lower())
+            played = re.search(r'"LastPlayed"\s+"(\d+)"', text)
+            games[appid] = (appid, name, int(played.group(1)) if played else 0)
+    return sorted(games.values(), key=lambda g: g[1].lower())
 
 
 def appid_from_shortcut(path):

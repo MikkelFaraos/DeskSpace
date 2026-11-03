@@ -199,6 +199,20 @@ class SettingsWindow(QWidget):
                          "link on a Clock && calendar widget."))
         boxes.append(box)
 
+        box, form = group("Console mode")
+        form.addRow(checkbox("Start in Console mode when I sign in (for a PC on a TV)", app.console_autostart,
+                             lambda on: app.set_option("console_autostart", on)))
+        console = QPushButton("Open Console mode")
+        console.clicked.connect(app.enter_console)
+        console_row = QHBoxLayout()
+        console_row.addWidget(console)
+        console_row.addStretch(1)
+        form.addRow(console_row)
+        form.addRow(hint("A full-screen home screen with your Steam and GOG games, your pets, volume and power, for "
+                         "a controller or keyboard. Hold Back + Start on the controller to return to it from "
+                         "anywhere. Leave it from System → Exit to desktop."))
+        boxes.append(box)
+
         box, form = group("File tidy")
         days = QSpinBox()
         days.setRange(0, 60)

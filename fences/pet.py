@@ -12,6 +12,7 @@ Each pet is its own window at desktop level like the fences, so they never cover
 import ctypes
 import math
 import random
+import time
 from ctypes import wintypes
 from datetime import date
 
@@ -65,10 +66,13 @@ def round_pen(color, width):
     return pen
 
 
+pad_activity = 0.0  # when a game controller was last used: Windows doesn't count that as input
+
+
 def idle_seconds():
     info = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
     user32.GetLastInputInfo(ctypes.byref(info))
-    return (ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000
+    return min((ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000, time.monotonic() - pad_activity)
 
 
 def outfit_today(today=None):
@@ -96,6 +100,8 @@ def screen_area(x, y):
 def find_platforms(app, x, y):
     """Walkable surfaces: (left, right, y, what). Fence tops, and the bottom of the screen."""
     area = screen_area(x, y)
+    if app.stage_floor is not None:  # Console mode: the top of its bottom bar is the only ground
+        return [(area.left(), area.right(), app.stage_floor, "floor")]
     found = [(area.left(), area.right(), area.bottom() + 1, "floor")]
     for panel in app.fences:
         if panel.isVisible():
@@ -388,6 +394,8 @@ class Pet(QWidget):
         super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnBottomHint)
         self.app = app
         self.info = info  # {"kind", "color", "name"}: the pet's entry in the app's pet list, edited in place
+        self.scale = 1.0
+        self.stage = None  # the Console mode window we're on, instead of the desktop
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(W, H)
         screen = QApplication.primaryScreen().availableGeometry()
@@ -416,14 +424,29 @@ class Pet(QWidget):
         self.platforms = self.find_platforms()
         self.place()
         self.show()
-        pin_to_desktop(int(self.winId()))
+        if self.stage:  # an owned window stays above its owner, and hides when that's minimized
+            user32.SetWindowLongPtrW(int(self.winId()), -8, self.stage)
+            self.lift()  # owning doesn't move it: Qt opened us at the bottom of the stack
+        else:
+            pin_to_desktop(int(self.winId()))
         self.timer.start()
         self.order_timer.start()
         self.stay_above_fences()
 
+    def set_stage(self, hwnd, scale, floor):
+        """Move onto the Console mode window at this size (hwnd None: back to the desktop)."""
+        self.stage, self.scale = hwnd, scale
+        # Stays-on-bottom forces the window down on every move, and Windows then drags its owner
+        # down with it: left on, it sinks the whole console below every other window.
+        self.setWindowFlag(Qt.WindowStaysOnBottomHint, not hwnd)
+        self.resize(int(W * scale), int(H * scale))
+        self.fy = float(floor)
+        self.vx, self.vy = 0.0, 0.0
+
     def stop(self):
         self.timer.stop()
         self.order_timer.stop()
+        self.timer.setInterval(33)  # we may have been asleep
         self.set_state("idle", 30)
         self.partner = self.rider = self.goal = None
         self.drop_bubble()
@@ -446,13 +469,19 @@ class Pet(QWidget):
         return next((p for p in self.platforms if p[0] <= self.fx <= p[1] and abs(p[2] - self.fy) < 2), None)
 
     def stay_above_fences(self):
-        stay_above_fences(self.app, self)
+        if not self.stage:
+            stay_above_fences(self.app, self)
+        elif user32.GetForegroundWindow() == self.stage:  # not over other apps you've switched to
+            self.lift()
+
+    def lift(self):
+        user32.SetWindowPos(int(self.winId()), 0, 0, 0, 0, 0, 0x13)  # HWND_TOP, NOSIZE|NOMOVE|NOACTIVATE
 
     def place(self):
-        self.move(int(self.fx - FOOT.x()), int(self.fy - FOOT.y()))
+        self.move(int(self.fx - FOOT.x() * self.scale), int(self.fy - FOOT.y() * self.scale))
         if self.bubble is not None:
             sp = self.spec()
-            top = self.fy - sp["legs"] - sp["body"][1] - sp["heart"] - 8
+            top = self.fy - (sp["legs"] + sp["body"][1] + sp["heart"] + 8) * self.scale
             self.bubble.move(int(self.fx - self.bubble.width() / 2), int(top - self.bubble.height()))
 
     # -- talking, treats
@@ -532,7 +561,7 @@ class Pet(QWidget):
         if s == "held":
             pos = QCursor.pos()
             self.vx, self.vy = pos.x() - self.fx, 0
-            self.fx, self.fy = float(pos.x()), float(pos.y() + 34)
+            self.fx, self.fy = float(pos.x()), float(pos.y() + 34 * self.scale)
         elif s in ("fall", "jump"):
             self.vy += GRAVITY
             new_y = self.fy + self.vy
@@ -611,7 +640,7 @@ class Pet(QWidget):
             return
         if roll < 0.55:
             self.dir = random.choice((-1, 1))
-            self.vx = self.spec()["speed"] * self.dir
+            self.vx = self.speed() * self.dir
             self.set_state("walk", random.randint(60, 220))
         elif roll < 0.8:
             self.set_state("idle", random.randint(40, 120))
@@ -652,7 +681,7 @@ class Pet(QWidget):
 
     def reach_of(self, other):
         """How close (centre to centre) we can stand to another pet without overlapping it."""
-        return (self.spec()["body"][0] + other.spec()["body"][0]) / 2 + 4
+        return ((self.spec()["body"][0] + other.spec()["body"][0]) / 2 + 4) * self.scale
 
     def greet(self, other):
         """Stop, face each other and share a heart."""
@@ -702,7 +731,7 @@ class Pet(QWidget):
         elif isinstance(goal, Treat):
             self.goal_x = goal.fx
         # Long enough to cross the screen at walking pace, then give up.
-        self.set_state("approach", int(abs(self.goal_x - self.fx) / (self.spec()["speed"] * 1.2)) + 90)
+        self.set_state("approach", int(abs(self.goal_x - self.fx) / (self.speed() * 1.2)) + 90)
 
     def run(self, ground):
         """Chasing, fleeing or walking over somewhere: like walking, with a purpose and a time limit."""
@@ -718,8 +747,8 @@ class Pet(QWidget):
                 self.social_cd = random.randint(400, 800)
                 return
             self.dir = 1 if prey.fx > self.fx else -1
-            self.fx = min(max(self.fx + self.dir * CHASE_SPEED, left), right)
-            if abs(prey.fx - self.fx) < 16:  # tag! both bounce with joy
+            self.fx = min(max(self.fx + self.dir * CHASE_SPEED * self.scale, left), right)
+            if abs(prey.fx - self.fx) < 16 * self.scale:  # tag! both bounce with joy
                 for pet in (self, prey):
                     pet.heart = 45
                     pet.vy, pet.vx = -6.0, 0.0
@@ -731,7 +760,7 @@ class Pet(QWidget):
             if not self.alive(chaser) or chaser.state != "chase":
                 self.set_state("idle", 40)
                 return
-            self.fx += self.dir * FLEE_SPEED
+            self.fx += self.dir * FLEE_SPEED * self.scale
             if self.fx < left or self.fx > right:  # cornered: dodge back past them
                 self.fx = min(max(self.fx, left), right)
                 self.dir = -self.dir
@@ -757,7 +786,7 @@ class Pet(QWidget):
                     return
                 x = goal.fx
                 self.dir = 1 if x > self.fx else -1
-                self.fx += self.dir * min(self.spec()["speed"] * 1.6, abs(x - self.fx))  # hurry
+                self.fx += self.dir * min(self.speed() * 1.6, abs(x - self.fx))  # hurry
                 if abs(x - self.fx) < self.spec()["body"][0] / 2 + 4:
                     self.set_state("eat", 80)
                 elif self.state_left <= 0:
@@ -773,7 +802,7 @@ class Pet(QWidget):
                 return
             x = min(max(self.goal_x, left), right)
             self.dir = 1 if x > self.fx else -1
-            self.fx += self.dir * min(self.spec()["speed"] * 1.2, abs(x - self.fx))
+            self.fx += self.dir * min(self.speed() * 1.2, abs(x - self.fx))
             if isinstance(goal, Pet):
                 if abs(goal.fx - self.fx) < 10 and abs(goal.fy - self.fy) < 2:
                     self.start_ride(goal)
@@ -804,7 +833,7 @@ class Pet(QWidget):
         left, right = ground[0] + 20, ground[1] - 20
         # Free spots at either end of the pile, so it grows outwards.
         spots = [x + side * self.reach_of(o) for x, o in pile for side in (-1, 1)]
-        spots = [x for x in spots if left <= x <= right and all(abs(x - t) > 30 for t, _ in pile)]
+        spots = [x for x in spots if left <= x <= right and all(abs(x - t) > 30 * self.scale for t, _ in pile)]
         spot = min(spots, key=lambda x: abs(x - self.fx), default=None)
         if spot is not None and abs(spot - self.fx) > 6:
             self.goal_x = spot
@@ -836,12 +865,15 @@ class Pet(QWidget):
             return
         sp = bear.spec()
         self.dir = bear.dir
-        self.fx = bear.fx - bear.dir * 4
-        self.fy = bear.fy - sp["legs"] - sp["body"][1] + 5
+        self.fx = bear.fx - bear.dir * 4 * self.scale
+        self.fy = bear.fy - (sp["legs"] + sp["body"][1] - 5) * self.scale
 
     # -- mouse
 
     def mousePressEvent(self, e):
+        if self.stage:  # on the TV pets are just there to watch: don't take the focus from the console
+            self.app.console.activateWindow()
+            return
         if e.button() == Qt.LeftButton:
             self.drag = (QCursor.pos(), False)
             self.timer.setInterval(33)
@@ -865,6 +897,8 @@ class Pet(QWidget):
             self.set_state("jump")
 
     def contextMenuEvent(self, e):
+        if self.stage:
+            return
         menu = QMenu()
         menu.addAction(f"Pet {self.info['name']}", lambda: setattr(self, "heart", 45))
         menu.addAction(f"Give {self.info['name']} a treat", self.give_treat)
@@ -889,6 +923,9 @@ class Pet(QWidget):
     def spec(self):
         return SPECIES.get(self.info["kind"], SPECIES["Cat"])
 
+    def speed(self):
+        return self.spec()["speed"] * self.scale
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
@@ -896,6 +933,7 @@ class Pet(QWidget):
         sp = self.spec()
         t = self.ticks
         s = self.state
+        p.scale(self.scale, self.scale)
         p.translate(FOOT.x(), FOOT.y())
         if self.dir < 0:
             p.scale(-1, 1)
@@ -1169,6 +1207,7 @@ class Pet(QWidget):
         hx, hy = bw / 2 - 8, -bh * 0.75 - breathe
         self.paint_head(p, sp, colors, hx, hy, 0, closed=True, lying=True)
         p.resetTransform()
+        p.scale(self.scale, self.scale)
         f = QFont()
         f.setBold(True)
         for i in range(3):  # drifting z's

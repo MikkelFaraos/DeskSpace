@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
 APP_NAME = "DeskSpace"
 OLD_NAME = "DeskFences"  # the app's name before 1.1: its data folder and startup entry get moved over
-APP_VERSION = "1.2.1"  # keep in step with build\installer.iss
+APP_VERSION = "1.3.0"  # keep in step with build\installer.iss
 APP_DIR = Path(__file__).resolve().parent.parent
 ENTRY_SCRIPT = APP_DIR / "deskspace.pyw"
 

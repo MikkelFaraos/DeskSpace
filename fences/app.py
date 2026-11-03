@@ -47,7 +47,8 @@ DEFAULT_NAMES = {"note": "Note", "todo": "To-do", "clock": "Clock", "monitor": "
 OPTIONS = {"locked": False, "snap": True, "snap_distance": 16, "quick_hide": True, "hide_icons": True,
            "match_wallpaper": True, "previews": True, "search_enabled": True, "search_hotkey": "Ctrl+Shift+Space",
            "pet_enabled": True, "pets": [], "pet_outfits": True, "pet_meetings": True, "track_key": "",
-           "keep_delivered_days": 2, "tidy_auto": False, "tidy_days": 2, "tidy_last": 0}
+           "keep_delivered_days": 2, "tidy_auto": False, "tidy_days": 2, "tidy_last": 0,
+           "console_autostart": False}
 PET_NAMES = ["Mochi", "Biscuit", "Pickles", "Nugget", "Pebble", "Clover", "Waffles", "Hazel", "Peanut", "Bramble",
              "Tofu", "Maple", "Juniper", "Muffin", "Pip", "Sprout"]
 # Files still being written by a browser or Office; rules leave them alone until they're final.
@@ -70,6 +71,9 @@ class DeskSpace:
         self.cleanup_window = None
         self.tidy_window = None
         self.ball = None
+        self.console = None
+        self.console_active = False
+        self.stage_floor = None  # where pets walk in Console mode
         self.alerted = set()  # calendar events the pets already announced
         self.wallpaper_color = None
         self.save_timer = QTimer(singleShot=True, interval=600, timeout=self.save)
@@ -116,6 +120,8 @@ class DeskSpace:
         self.chores_timer = QTimer(interval=30000, timeout=lambda: (self.check_meetings(), self.daily_tidy()))
         self.chores_timer.start()
         QTimer.singleShot(60000, self.daily_tidy)
+        if self.console_autostart:
+            QTimer.singleShot(2500, self.enter_console)
         # Monitors can still be coming up at login; only rescue off-screen fences once they're settled.
         QTimer.singleShot(15000, self.rescue_offscreen)
 
@@ -149,6 +155,7 @@ class DeskSpace:
         menu.addAction("Search…", self.open_search)
         menu.addAction("Auto-sort desktop into fences…", self.auto_sort)
         menu.addAction("Tidy files…", self.open_tidy)
+        menu.addAction("Console mode", self.enter_console)
         self.hide_action = menu.addAction("Hide fences", self.toggle_hidden)
         menu.addSeparator()
         menu.addAction("Settings…", self.open_settings)
@@ -168,6 +175,30 @@ class DeskSpace:
         if self.settings_window is None:
             self.settings_window = SettingsWindow(self)
         self.settings_window.open_for(panel)
+
+    def enter_console(self):
+        """Full-screen home screen for a PC on a TV; the fences step aside while it's open."""
+        if self.console_active:
+            self.console.come_back()
+            return
+        from .console import ConsoleWindow
+        if self.console is None:
+            self.console = ConsoleWindow(self)
+        self.console_active = True
+        for f in self.fences:
+            f.hide()
+        self.stop_pets()
+        self.console.open()
+
+    def exit_console(self):
+        self.console_active = False
+        self.console.close_console()
+        if not self.hidden:
+            for f in self.fences:
+                if f.shown:
+                    f.show_pinned()
+            if self.pet_enabled:
+                self.start_pets()
 
     def open_tidy(self):
         from .tidy import TidyWindow
@@ -233,6 +264,8 @@ class DeskSpace:
             self.settings_window.reload_later()
 
     def toggle_hidden(self):
+        if self.console_active:
+            return
         self.hidden = not self.hidden
         for f in self.fences:
             if self.hidden:
@@ -400,7 +433,7 @@ class DeskSpace:
 
     def check_desktop(self):
         progman = user32.FindWindowW("Progman", None)
-        if not progman or self.hidden:
+        if not progman or self.hidden or self.console_active:
             return
         for i, panel in enumerate(list(self.fences)):
             hwnd = int(panel.winId())
@@ -614,6 +647,8 @@ class DeskSpace:
         COVER_CACHE.mkdir(parents=True, exist_ok=True)
         ctypes.windll.kernel32.SetFileAttributesW(str(COVER_CACHE), 0x2)  # hidden
         (COVER_CACHE / (filename or f"{appid}.jpg")).write_bytes(data)
+        if self.console is not None:
+            self.console.covers_changed()
         for fence in self.folder_fences():
             if fence.view == "tiles":
                 fence.schedule_refresh()
@@ -658,6 +693,8 @@ class DeskSpace:
             self.icons_hidden = False
 
     def quit(self):
+        if self.console_active:
+            self.exit_console()
         self.restore_icons()
         self.save()
         self.hotkey.unregister()

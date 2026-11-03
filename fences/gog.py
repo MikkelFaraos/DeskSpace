@@ -6,9 +6,13 @@ Shortcuts DeskSpace makes start the game through GOG Galaxy when it's installed 
 cloud saves work), otherwise the game's own exe. Covers come from GOG's games database.
 """
 import json
+import os
 import re
+import subprocess
 import winreg
 from pathlib import Path
+
+import psutil
 
 from .common import COVER_CACHE
 
@@ -104,6 +108,25 @@ def make_shortcut(path, game):
     link.SetIconLocation(str(game["exe"]), 0)
     link.SetDescription(DESCRIPTION.format(game["id"]))
     link.QueryInterface(pythoncom.IID_IPersistFile).Save(str(path), 0)
+
+
+def run_game(game):
+    """Start a game from installed_games() the same way our shortcuts do."""
+    galaxy = galaxy_exe()
+    if galaxy:
+        subprocess.Popen([str(galaxy), "/command=runGame", f'/gameId={game["id"]}', f'/path={game["folder"]}'],
+                         cwd=galaxy.parent)
+    else:
+        subprocess.Popen(f'"{game["exe"]}" {game["args"]}', cwd=game["workdir"])
+
+
+def is_running(game):
+    """Is anything running from the game's folder?"""
+    folder = str(game["folder"]).lower() + os.sep
+    for process in psutil.process_iter(["exe"]):
+        if (process.info["exe"] or "").lower().startswith(folder):
+            return True
+    return False
 
 
 _ids = {}  # shortcut path -> (modified time, game id or None)

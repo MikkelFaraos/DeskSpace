@@ -54,7 +54,7 @@ def run(report_path):
     def modules():
         importlib.import_module("send2trash")
         importlib.import_module("fences.app")  # imports every feature module...
-        for name in ("settings", "tidy", "cleanup"):  # ...except the windows it opens on demand
+        for name in ("settings", "tidy", "cleanup", "console"):  # ...except the windows it opens on demand
             importlib.import_module(f"fences.{name}")
 
     for name, func in (("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Media session API", media),
