@@ -29,7 +29,7 @@ jobs:
             set -e
             openbox & sleep 2
             bash build/install-linux.sh
-            sleep 8
+            for i in $(seq 1 40); do test -f ~/.config/autostart/deskspace.desktop && break; sleep 1; done
             test -x ~/.local/bin/deskspace
             test -f ~/.local/share/applications/deskspace.desktop
             test -f ~/.local/share/icons/hicolor/256x256/apps/deskspace.png
@@ -75,6 +75,8 @@ jobs:
       matrix:
         system: ["ubuntu:22.04", "ubuntu:24.04"]  # the bases of Linux Mint 21 and 22
     container: ${{ matrix.system }}
+    env:
+      DEBIAN_FRONTEND: noninteractive  # no keyboard here to answer the timezone package's questions
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -96,10 +98,11 @@ jobs:
             set -e
             openbox & sleep 2
             deskspace > "$HOME/out.txt" 2>&1 &
-            sleep 10
+            for i in $(seq 1 40); do test -f "$HOME/.config/autostart/deskspace.desktop" && break; sleep 1; done
             cat "$HOME/out.txt"
             pgrep -f "[o]pt/deskspace/app/deskspace.pyw"
-            grep -E "^(Exec|TryExec)=/usr/bin/deskspace$" "$HOME/.config/autostart/deskspace.desktop"
+            grep -x "Exec=/usr/bin/deskspace" "$HOME/.config/autostart/deskspace.desktop"
+            grep -x "TryExec=/usr/bin/deskspace" "$HOME/.config/autostart/deskspace.desktop"
             test -f "$HOME/DeskSpace/config.json"
             pkill -f "[o]pt/deskspace/app/deskspace.pyw"
           '
@@ -114,4 +117,5 @@ jobs:
         run: |
           apt-get remove -y deskspace
           test ! -e /usr/bin/deskspace
-          test ! -e /opt/deskspace/app
+          test ! -e /usr/share/applications/deskspace.desktop
+          test ! -e /opt/deskspace

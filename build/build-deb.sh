@@ -82,6 +82,10 @@ EOF
 cat > "$STAGE/DEBIAN/postrm" <<'EOF'
 #!/bin/sh
 set -e
+# Python's cache files aren't in the package, so dpkg leaves them (and their folders) behind.
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    rm -rf /opt/deskspace
+fi
 update-desktop-database -q /usr/share/applications 2>/dev/null || true
 gtk-update-icon-cache -q -t -f /usr/share/icons/hicolor 2>/dev/null || true
 EOF
