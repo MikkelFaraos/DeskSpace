@@ -13,7 +13,7 @@
 
 #define AppName "DeskSpace"
 #define OldName "DeskFences"
-#define AppVersion "1.4.0"
+#define AppVersion "1.4.1"
 #define Launcher "{app}\runtime\DeskSpace.exe"
 #define Script "{app}\app\deskspace.pyw"
 

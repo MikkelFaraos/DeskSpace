@@ -52,13 +52,18 @@ def run(report_path):
         from fences.sysinfo import GpuCounters
         return GpuCounters().name or "no GPU name"
 
+    def launchers():
+        from fences.launchers import installed
+        return ", ".join(name for name, _ in installed()) or "none here"
+
     def modules():
         importlib.import_module("send2trash")
         importlib.import_module("fences.app")  # imports every feature module...
         for name in ("settings", "tidy", "cleanup", "console"):  # ...except the windows it opens on demand
             importlib.import_module(f"fences.{name}")
 
-    checks = [("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Calendar parsing", calendar)]
+    checks = [("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Calendar parsing", calendar),
+              ("Game launchers", launchers)]
     if sys.platform == "win32":
         checks += [("Media session API", media), ("COM / Windows Search", com), ("GPU counters", stats)]
     for name, func in checks:

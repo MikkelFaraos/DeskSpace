@@ -10,7 +10,7 @@ from .system import desktop_dir, is_hidden  # noqa: F401 (is_hidden is used thro
 
 APP_NAME = "DeskSpace"
 OLD_NAME = "DeskFences"  # the app's name before 1.1: its data folder and startup entry get moved over
-APP_VERSION = "1.4.0"  # keep in step with build\installer.iss
+APP_VERSION = "1.4.1"  # keep in step with build\installer.iss
 APP_DIR = Path(__file__).resolve().parent.parent
 ENTRY_SCRIPT = APP_DIR / "deskspace.pyw"
 

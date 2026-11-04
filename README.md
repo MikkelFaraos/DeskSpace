@@ -2,7 +2,7 @@
 
 Translucent fences and widgets for the Windows desktop. Sort your icons into fences, keep notes, a calendar and system stats on the desktop, launch your games from cover art, and share it all with a few small animals that wander along the tops of your fences.
 
-Everything sits at desktop level, so it never covers your apps. Current version: **1.4.0**. Built with Python and PySide6. Developed and tested on Windows 11, with a [Linux version](#linux) for Ubuntu and Linux Mint.
+Everything sits at desktop level, so it never covers your apps. Current version: **1.4.1**. Built with Python and PySide6. Developed and tested on Windows 11, with a [Linux version](#linux) for Ubuntu and Linux Mint.
 
 ## Features
 
@@ -52,10 +52,12 @@ Everything sits at desktop level, so it never covers your apps. Current version:
 A full-screen home screen for a PC on a TV, made to be used from the sofa. Open it from the tray icon or Settings, or set it to start when you sign in.
 
 - **Game library:** your Steam and GOG games as a big cover grid, most recently played first.
-- **System page:** volume, sleep, restart, shut down and exit to desktop.
+- **System page:** volume, game launchers, minimize, sleep, restart, shut down and exit to desktop.
+- **Game launchers:** open Steam, GOG Galaxy, Epic Games, the EA app, Ubisoft Connect, Battle.net, Amazon Games, Xbox and others you have installed.
 - **Pets:** they walk along the bottom of the screen at double size.
 - **Controls:** an Xbox-style controller, the keyboard or the mouse. The on-screen hints follow whichever you used last.
-- **Playing:** starting a game steps out of the way, and the console comes back when the game ends. Hold **Back + Start** on the controller to return to it at any time.
+- **Playing:** starting a game steps out of the way, and the console comes back when the game ends.
+- **Stepping away:** minimizing or closing the console window leaves it running in the background. Hold **Back + Start** on the controller, or use the tray icon, to return to it at any time.
 
 PlayStation controllers aren't read directly yet. They work if a tool such as Steam Input or DS4Windows presents them as an Xbox controller.
 
