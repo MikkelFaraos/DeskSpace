@@ -80,6 +80,15 @@ def check(cond, text):
 
 def shot(name):
     qt.primaryScreen().grabWindow(0).save(str(out / f"{name}.png"))
+    log.append(f"     None references at {name}: {sys.getrefcount(None)}")
+
+
+def none_leak(seconds=6):
+    """References to None lost per second while the app sits idle. Below Python 3.12 they're counted,
+    and a steady loss crashes the process when it reaches zero, so this has to be about nothing."""
+    before = sys.getrefcount(None)
+    pump(seconds)
+    return (before - sys.getrefcount(None)) / seconds
 
 
 def pump(seconds):
@@ -108,6 +117,9 @@ def steps():
     check(all(f.isVisible() for f in app.fences), "all fences are on screen")
     work = next(f for f in app.fences if f.name == "Work")
     check(work.list.count() == 1, "folder fence listed its files")
+    leak = none_leak()
+    if sys.version_info < (3, 12):
+        check(leak < 5, f"no steady leak of None while idle: {leak:.1f} a second")
     state = window_state(app.fences[0])
     log.append("     window manager state: " + " | ".join(l for l in state.splitlines() if "_NET_WM_STATE" in l
                                                          or "WINDOW_TYPE" in l))
@@ -267,6 +279,9 @@ def steps():
     os.close(write)
     check(js.read() is None, "joystick: unplugged is noticed")
 
+    leak = none_leak()
+    if sys.version_info < (3, 12):
+        check(leak < 5, f"no steady leak of None in Console mode: {leak:.1f} a second")
     app.exit_console()
     pump(1)
     check(all(f.isVisible() for f in app.fences if f.shown), "exit: fences are back")

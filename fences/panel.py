@@ -173,8 +173,6 @@ class Panel(QWidget):
     def nativeEvent(self, event_type, message):
         # Windows sends these continuously during a move/resize drag; adjusting the proposed
         # rect in place makes the panel snap to monitor edges and other panels live.
-        if not IS_WINDOWS:
-            return False, 0
         msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_ENTERSIZEMOVE:
             rc = wintypes.RECT()
@@ -384,3 +382,9 @@ class Panel(QWidget):
             self.custom_color = True
             self.update()
             self.app.schedule_save()
+
+
+if not IS_WINDOWS:
+    # Qt would call this for every X11 event, and each call costs Python a reference to None: on
+    # Python below 3.12 those run out within minutes and the whole app crashes.
+    del Panel.nativeEvent

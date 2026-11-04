@@ -73,13 +73,15 @@ class HotkeyListener(QWidget):
             self.registered = False
 
     def nativeEvent(self, event_type, message):
-        if not IS_WINDOWS:
-            return False, 0
         from ctypes import wintypes
         msg = wintypes.MSG.from_address(int(message))
         if msg.message == WM_HOTKEY:
             QTimer.singleShot(0, self.callback)
         return False, 0
+
+
+if not IS_WINDOWS:  # see the note at the end of panel.py
+    del HotkeyListener.nativeEvent
 
 
 class IndexSearcher(QObject):
