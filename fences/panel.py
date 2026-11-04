@@ -385,6 +385,5 @@ class Panel(QWidget):
 
 
 if not IS_WINDOWS:
-    # Qt would call this for every X11 event, and each call costs Python a reference to None: on
-    # Python below 3.12 those run out within minutes and the whole app crashes.
+    # It reads Windows messages; without this Qt would call it for every X11 event for nothing.
     del Panel.nativeEvent

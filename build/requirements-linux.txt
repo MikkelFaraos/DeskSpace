@@ -1,5 +1,7 @@
 # Libraries for the Linux version (build\requirements-runtime.txt is the Windows list).
-PySide6_Essentials==6.12.0
+# Not 6.12.0: on Python below 3.12 (Ubuntu 22.04, Linux Mint 21) it loses a reference to None on every
+# simple Qt call, and the app crashes with "deallocating None" within a minute or so.
+PySide6_Essentials==6.11.3
 psutil==7.2.2
 icalendar==7.3.0
 recurring-ical-events==3.8.2

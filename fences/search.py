@@ -80,7 +80,7 @@ class HotkeyListener(QWidget):
         return False, 0
 
 
-if not IS_WINDOWS:  # see the note at the end of panel.py
+if not IS_WINDOWS:  # it reads Windows messages; no use for X11 events
     del HotkeyListener.nativeEvent
 
 
