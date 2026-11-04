@@ -79,6 +79,8 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 [Run]
 Filename: "{#Launcher}"; Parameters: """{#Script}"""; WorkingDir: "{app}\app"; Description: "Launch {#AppName}"; \
     Flags: nowait postinstall skipifsilent
+; The in-app update installs silently, and the app has to start again afterwards.
+Filename: "{#Launcher}"; Parameters: """{#Script}"""; WorkingDir: "{app}\app"; Flags: nowait; Check: WizardSilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"

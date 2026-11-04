@@ -56,6 +56,13 @@ def run(report_path):
         from fences.launchers import installed
         return ", ".join(name for name, _ in installed()) or "none here"
 
+    def updates():
+        from fences.updates import read_release
+        tag = {"tag_name": "v99.0", "assets": [{"name": "DeskSpace-Setup-99.0.exe", "browser_download_url":
+               "https://github.com/MikkelFaraos/DeskSpace/releases/download/v99.0/DeskSpace-Setup-99.0.exe"}]}
+        if not read_release(tag)["url"] or read_release({"tag_name": "v0.1"}):
+            raise ValueError("version comparison")
+
     def modules():
         importlib.import_module("send2trash")
         importlib.import_module("fences.app")  # imports every feature module...
@@ -63,7 +70,7 @@ def run(report_path):
             importlib.import_module(f"fences.{name}")
 
     checks = [("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Calendar parsing", calendar),
-              ("Game launchers", launchers)]
+              ("Game launchers", launchers), ("Updates", updates)]
     if sys.platform == "win32":
         checks += [("Media session API", media), ("COM / Windows Search", com), ("GPU counters", stats)]
     for name, func in checks:

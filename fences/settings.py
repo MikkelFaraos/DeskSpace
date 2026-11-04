@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import dialogs
-from .common import APP_NAME, DATA_ROOT, make_app_icon
+from .common import APP_NAME, APP_VERSION, DATA_ROOT, make_app_icon
 from .dialogs import bring_to_front
 from .pet import PALETTES, SPECIES
 from .system import IS_WINDOWS, open_path
@@ -217,6 +217,18 @@ class SettingsWindow(QWidget):
         form.addRow(hint("A full-screen home screen with your Steam and GOG games, your pets, volume and power, for "
                          "a controller or keyboard. Hold Back + Start on the controller to return to it from "
                          "anywhere. Leave it from System → Exit to desktop."))
+        boxes.append(box)
+
+        box, form = group("Updates")
+        form.addRow(checkbox("Check for new versions once a day", app.update_check,
+                             lambda on: app.set_option("update_check", on)))
+        update = QPushButton("Check now")
+        update.clicked.connect(lambda: app.updater.check(quiet=False))
+        update_row = QHBoxLayout()
+        update_row.addWidget(update)
+        update_row.addWidget(QLabel(f"You have version {APP_VERSION}"))
+        update_row.addStretch(1)
+        form.addRow(update_row)
         boxes.append(box)
 
         box, form = group("File tidy")

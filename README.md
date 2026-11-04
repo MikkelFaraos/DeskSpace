@@ -125,6 +125,10 @@ The Linux version has been tested automatically on Ubuntu with a basic window ma
 
 Fences, notes and settings are stored in `%USERPROFILE%\DeskSpace`, and installing, updating or uninstalling doesn't touch them. If you're coming from the old DeskFences name, the data folder moves over the first time the app starts.
 
+## Updates
+
+DeskSpace checks GitHub once a day for a new version, and tells you through the tray icon when there is one. Install it from the tray menu, or use **Check now** in Settings. The check sends nothing about you, and you can turn it off in Settings. The installer is checked against GitHub's checksum, and if Windows blocks it, DeskSpace starts again unchanged. On Linux, the update opens the release page instead.
+
 ## Uninstall
 
 Remove DeskSpace in **Settings → Apps**, or with **Uninstall DeskSpace** in the Start menu. Your `DeskSpace` data folder is kept.
