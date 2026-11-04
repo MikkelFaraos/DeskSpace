@@ -54,7 +54,7 @@ fences += [{"id": k, "kind": k, "name": k.title(), "x": x, "y": y, "w": 300, "h"
     "pets": [{"kind": "Bear", "color": "Brown", "name": "Honey"}, {"kind": "Rabbit", "color": "White", "name": "Bun"}]}))
 
 from PySide6.QtCore import QEvent, QPoint, QTimer, Qt  # noqa: E402
-from PySide6.QtGui import QKeyEvent  # noqa: E402
+from PySide6.QtGui import QCloseEvent, QKeyEvent  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 qt = QApplication([])
@@ -96,6 +96,14 @@ def pump(seconds):
     while time.monotonic() < end:
         qt.processEvents()
         time.sleep(0.01)
+
+
+def spontaneous_close():
+    """A close event from the system, which Qt doesn't let Python build directly."""
+    class Close(QCloseEvent):
+        def spontaneous(self):
+            return True
+    return Close()
 
 
 def window_state(widget):
@@ -254,7 +262,30 @@ def steps():
     pump(0.3)
     check(c.page == 1, "Tab opens the System page")
     shot("06_system")
-    c.row = 3
+    con.launchers.installed = lambda: [("Steam", "steam"), ("Lutris", "lutris")]
+    opened = []
+    con.launchers.start = opened.append
+    c.row = 1
+    key(Qt.Key_Return)
+    check([r[0] for r in c.system_rows()] == ["Steam", "Lutris", "Back"], "game launchers are listed")
+    pump(0.2)
+    shot("07_launchers")
+    key(Qt.Key_Down)
+    key(Qt.Key_Return)
+    pump(0.5)
+    check(opened == ["lutris"] and app.console_active, "a launcher opens and the console keeps running")
+    c.come_back()
+    pump(0.5)
+    check(c.isVisible() and not c.isMinimized(), "the console comes back after a launcher")
+    key(Qt.Key_Escape)
+    check(c.launchers is None and c.page == 1, "Esc goes back from the launcher list")
+    c.closeEvent(spontaneous_close())
+    pump(0.5)
+    check(app.console_active and c.isMinimized(), "closing the window only minimizes the console")
+    app.toggle_hidden()
+    pump(0.5)
+    check(not c.isMinimized(), "the tray icon brings the console back")
+    c.row = 5
     key(Qt.Key_Return)
     key(Qt.Key_Return)
     check(powers == ["shutdown"], "shut down asks, then goes through (faked here)")

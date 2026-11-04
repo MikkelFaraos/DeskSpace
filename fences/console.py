@@ -1,9 +1,10 @@
 """Console mode: a full-screen home screen for a PC on a TV, made to be used from the sofa.
 
-Your Steam and GOG games as a big cover grid (recently played first), a System page with volume
-and power, and your pets walking along the bottom bar. Works with an Xbox-style controller, the
-keyboard and the mouse. Starting a game gets out of the way; when the game ends the console comes
-back by itself, and holding Back + Start brings it back at any time.
+Your Steam and GOG games as a big cover grid (recently played first), a System page with volume,
+game launchers and power, and your pets walking along the bottom bar. Works with an Xbox-style
+controller, the keyboard and the mouse. Starting a game gets out of the way; when the game ends the
+console comes back by itself. Minimized or closed from Windows it keeps running in the background,
+and holding Back + Start or using the tray icon brings it back at any time.
 """
 import ctypes
 import os
@@ -17,7 +18,7 @@ from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 
-from . import gog, pet, steam
+from . import gog, launchers, pet, steam
 from .common import ACCENT, APP_NAME
 from .dialogs import bring_to_front
 from .folder import make_tile
@@ -361,6 +362,7 @@ class ConsoleWindow(QWidget):
         self.page = 0
         self.index = 0
         self.row = 0  # selected row on the System page
+        self.launchers = None  # [(name, program)] while the System page lists them
         self.scroll = 0.0
         self.target = 0.0
         self.confirm = None  # (question, action) waiting for a yes
@@ -430,7 +432,8 @@ class ConsoleWindow(QWidget):
         self.pad.start()
         self.clock.start()
         # Steam and friends may still be opening their windows after sign-in.
-        QTimer.singleShot(8000, lambda: self.isVisible() and not self.playing and bring_to_front(self))
+        QTimer.singleShot(8000, lambda: self.isVisible() and not self.isMinimized() and not self.playing
+                          and bring_to_front(self))
 
     def show_home(self):
         self.showFullScreen()
@@ -447,6 +450,12 @@ class ConsoleWindow(QWidget):
         self.playing = None
         self.setCursor(Qt.ArrowCursor)
         self.hide()
+
+    def closeEvent(self, e):
+        """Closing it from outside (Alt+F4, the taskbar) only steps aside: "Exit to desktop" is the way out."""
+        if self.app.console_active and e.spontaneous():
+            e.ignore()
+            self.showMinimized()
 
     def pets_on(self):
         app = self.app
@@ -544,6 +553,7 @@ class ConsoleWindow(QWidget):
     def set_page(self, page):
         self.page = page % len(PAGES)
         self.row = 0
+        self.launchers = None
         self.refresh_volume()
         self.update()
 
@@ -567,11 +577,28 @@ class ConsoleWindow(QWidget):
         self.update()
 
     def system_rows(self):
+        if self.launchers is not None:
+            return [(name, lambda p=program: self.open_launcher(p)) for name, program in self.launchers] \
+                + [("Back", self.close_launchers)]
         return [("Volume", None),
+                ("Game launchers", self.show_launchers),
+                ("Minimize (hold Back + Start to return)", self.showMinimized),
                 ("Sleep", self.do_sleep),
                 ("Restart", lambda: self.ask("Restart the PC?", restart_pc)),
                 ("Shut down", lambda: self.ask("Shut down the PC?", shutdown_pc)),
                 ("Exit to desktop", self.app.exit_console)]
+
+    def show_launchers(self):
+        self.launchers = launchers.installed()
+        self.row = 0
+
+    def close_launchers(self):
+        self.launchers = None
+        self.row = 1
+
+    def open_launcher(self, program):
+        launchers.start(program)
+        self.showMinimized()
 
     def do_sleep(self):
         sleep_pc()
@@ -583,12 +610,12 @@ class ConsoleWindow(QWidget):
     def do_system(self, action):
         rows = self.system_rows()
         if action == "back":
-            self.set_page(0)
+            self.set_page(0) if self.launchers is None else self.close_launchers()
         elif action == "up":
             self.row = max(0, self.row - 1)
         elif action == "down":
             self.row = min(len(rows) - 1, self.row + 1)
-        elif action in ("left", "right") and self.row == 0:
+        elif action in ("left", "right") and self.row == 0 and self.launchers is None:
             self.change_volume(0.05 if action == "right" else -0.05)
         elif action == "ok" and rows[self.row][1]:
             rows[self.row][1]()
@@ -763,8 +790,10 @@ class ConsoleWindow(QWidget):
         width = min(self.u(900), self.width() - 2 * self.margin())
         left = (self.width() - width) / 2
         y = self.grid_top() + self.u(20)
-        height = self.u(96)
-        for i, (name, _) in enumerate(self.system_rows()):
+        rows = self.system_rows()
+        gap = self.u(18)
+        height = min(self.u(96), (self.bar_top() - y - gap) / len(rows) - gap)
+        for i, (name, _) in enumerate(rows):
             rect = QRectF(left, y, width, height)
             chosen = i == self.row
             p.setPen(QPen(ACCENT, self.u(4)) if chosen else Qt.NoPen)
@@ -774,9 +803,9 @@ class ConsoleWindow(QWidget):
             p.setPen(WHITE)
             p.drawText(rect.adjusted(self.u(32), 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, name)
             self.hits.append((rect, ("row", i)))
-            if i == 0:
+            if i == 0 and self.launchers is None:
                 self.paint_volume(p, rect)
-            y += height + self.u(18)
+            y += height + gap
 
     def paint_volume(self, p, rect):
         track = QRectF(rect.left() + self.u(210), rect.center().y() - self.u(7), rect.width() - self.u(350), self.u(14))
@@ -821,7 +850,8 @@ class ConsoleWindow(QWidget):
         pad = self.using_pad
         if self.page == 0:
             return [("A" if pad else "Enter", "Play"), ("LB/RB" if pad else "Tab", "System")]
-        return [("A" if pad else "Enter", "Select"), ("B" if pad else "Esc", "Games")]
+        back = "Games" if self.launchers is None else "Back"
+        return [("A" if pad else "Enter", "Select"), ("B" if pad else "Esc", back)]
 
     def paint_hint(self, p, right, rect, button, text):
         """One button hint, ending at `right`; returns where the next one should end."""

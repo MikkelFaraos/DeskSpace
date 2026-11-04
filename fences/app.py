@@ -268,6 +268,7 @@ class DeskSpace:
 
     def toggle_hidden(self):
         if self.console_active:
+            self.console.come_back()
             return
         self.hidden = not self.hidden
         for f in self.fences:
