@@ -376,6 +376,9 @@ class DeskSpace:
         QTimer.singleShot(1200, lambda: (setattr(panel, "drop_hover", False), panel.update()))
 
     def startup_command(self):
+        # Linux installs start us through their own launcher, which is what should run at sign-in.
+        if os.environ.get("DESKSPACE_LAUNCHER"):
+            return os.environ["DESKSPACE_LAUNCHER"]
         # Installed: runtime\DeskSpace.exe (a renamed, signed pythonw.exe). Dev: the venv's pythonw.exe.
         exe = Path(sys.executable)
         if exe.name.lower() == "python.exe":

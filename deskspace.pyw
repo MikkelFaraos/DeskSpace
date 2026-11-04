@@ -6,6 +6,11 @@ DeskSpace.exe); the app lives in the `fences` package next to this file.
 import sys
 from pathlib import Path
 
+# The Linux package keeps its Python libraries next to the app.
+_bundled = Path(__file__).resolve().parent.parent / "lib"
+if _bundled.is_dir():
+    sys.path.insert(0, str(_bundled))
+
 if __name__ == "__main__" and "--selftest" in sys.argv:
     # Used by the build: checks a packaged exe bundled everything, without starting the app.
     from fences.selftest import run

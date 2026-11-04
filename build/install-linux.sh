@@ -51,6 +51,7 @@ rm -rf "$APP_DIR/app/fences/__pycache__"
 mkdir -p "$(dirname "$BIN")" "$(dirname "$LAUNCHER")" "$(dirname "$ICON")"
 cat > "$BIN" <<EOF
 #!/bin/sh
+export DESKSPACE_LAUNCHER="$BIN"
 exec "$APP_DIR/venv/bin/python" "$APP_DIR/app/deskspace.pyw" "\$@"
 EOF
 chmod +x "$BIN"

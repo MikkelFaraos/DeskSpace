@@ -19,7 +19,8 @@ out.mkdir(parents=True, exist_ok=True)
 home = Path(tempfile.mkdtemp())
 os.environ.update(HOME=str(home), XDG_CONFIG_HOME=str(home / ".config"), QT_QPA_PLATFORM="xcb",
                   XDG_RUNTIME_DIR=str(home))
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# DESKSPACE_APP tests an installed copy (the .deb) rather than this checkout.
+sys.path.insert(0, os.environ.get("DESKSPACE_APP", str(Path(__file__).resolve().parent.parent)))
 
 # What a real system has lying around: a Steam game, a launcher, downloads, a screenshot
 steam = home / ".steam/steam/steamapps"

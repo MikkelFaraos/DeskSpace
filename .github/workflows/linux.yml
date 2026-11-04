@@ -50,3 +50,68 @@ jobs:
         with:
           name: screenshots
           path: screenshots
+
+  deb:
+    runs-on: ubuntu-22.04  # the oldest system we support, so pip picks libraries that run on all of them
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: System packages
+        run: sudo apt-get update && sudo apt-get install -y libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1
+      - name: Build
+        run: bash build/build-deb.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+          compression-level: 0
+
+  deb-test:
+    needs: deb
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        system: ["ubuntu:22.04", "ubuntu:24.04"]  # the bases of Linux Mint 21 and 22
+    container: ${{ matrix.system }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: deb
+          path: package
+      - name: Install the package on a clean system
+        run: |
+          apt-get update
+          apt-get install -y ./package/*.deb
+          apt-get install -y xvfb openbox x11-utils procps fonts-dejavu-core
+          dpkg -s deskspace | grep -E "^(Status|Version|Installed-Size)"
+          python3 --version
+      - name: Start it the way a user would
+        run: |
+          export HOME=/tmp/person XDG_CONFIG_HOME=/tmp/person/.config XDG_RUNTIME_DIR=/tmp/person
+          mkdir -p "$HOME"
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c '
+            set -e
+            openbox & sleep 2
+            deskspace > "$HOME/out.txt" 2>&1 &
+            sleep 10
+            cat "$HOME/out.txt"
+            pgrep -f "[o]pt/deskspace/app/deskspace.pyw"
+            grep -E "^(Exec|TryExec)=/usr/bin/deskspace$" "$HOME/.config/autostart/deskspace.desktop"
+            test -f "$HOME/DeskSpace/config.json"
+            pkill -f "[o]pt/deskspace/app/deskspace.pyw"
+          '
+      - name: Run the full test on the installed copy
+        env:
+          DESKSPACE_APP: /opt/deskspace/app
+          PYTHONPATH: /opt/deskspace/lib
+        run: |
+          xvfb-run -a -s "-screen 0 1920x1080x24" bash -c \
+            'openbox & sleep 2; python3 tests/linux_smoke.py screenshots'
+      - name: Remove the package
+        run: |
+          apt-get remove -y deskspace
+          test ! -e /usr/bin/deskspace
+          test ! -e /opt/deskspace/app

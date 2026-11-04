@@ -124,8 +124,10 @@ def set_startup(name, command, on):
         path = autostart_file(name)
         if on:
             AUTOSTART.mkdir(parents=True, exist_ok=True)
-            path.write_text(f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\nIcon=deskspace\n"
-                            "X-GNOME-Autostart-enabled=true\n", encoding="utf-8")
+            # TryExec: if the app is removed, the desktop skips this file instead of failing at sign-in.
+            path.write_text(f"[Desktop Entry]\nType=Application\nName={name}\nExec={command}\n"
+                            f"TryExec={shlex.split(command)[0]}\nIcon=deskspace\nX-GNOME-Autostart-enabled=true\n",
+                            encoding="utf-8")
         else:
             path.unlink(missing_ok=True)
         return
