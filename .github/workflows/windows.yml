@@ -25,6 +25,16 @@ jobs:
           .venv\Scripts\python.exe -m pip install -r build\requirements-runtime.txt pillow
       - name: Build
         run: powershell -ExecutionPolicy Bypass -File build\build.ps1
+      - name: Test the update command
+        run: .venv\Scripts\python.exe tests\windows_update.py
+      - name: Silent install starts the app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\DeskSpace-Setup-*.exe | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList "/SILENT", "/SUPPRESSMSGBOXES" -Wait
+          Start-Sleep -Seconds 15
+          Get-Process DeskSpace
+          Stop-Process -Name DeskSpace
       - uses: actions/upload-artifact@v4
         with:
           name: DeskSpace-Setup
