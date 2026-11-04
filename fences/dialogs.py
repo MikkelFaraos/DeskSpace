@@ -13,7 +13,7 @@ from PySide6.QtGui import QCursor, QGuiApplication
 from PySide6.QtWidgets import QColorDialog, QFileDialog, QInputDialog, QLineEdit, QMessageBox, QWidget
 
 from .common import APP_NAME
-from .win32 import user32
+from .system import user32
 
 _anchor = None
 open_count = 0  # dialogs currently open; windows shouldn't rebuild themselves under an open dialog

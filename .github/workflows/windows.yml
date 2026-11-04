@@ -1,0 +1,50 @@
+# Builds the Windows installer on a real Windows machine and keeps it as a download.
+name: Windows build
+
+on:
+  push:
+    branches: [windows-build]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Python libraries
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -r build\requirements-runtime.txt pillow
+      - name: Build
+        run: powershell -ExecutionPolicy Bypass -File build\build.ps1
+      - name: Test the update command
+        run: .venv\Scripts\python.exe tests\windows_update.py
+      - name: Silent install starts the app
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\DeskSpace-Setup-*.exe | Select-Object -First 1
+          # Only the setup: Start-Process -Wait would also wait for the app it starts.
+          $run = Start-Process $setup.FullName -ArgumentList "/SILENT", "/SUPPRESSMSGBOXES" -PassThru
+          if (-not $run.WaitForExit(180000)) { throw "the setup didn't finish" }
+          Start-Sleep -Seconds 15
+          Get-Process DeskSpace
+          Stop-Process -Name DeskSpace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskSpace-Setup
+          path: dist/DeskSpace-Setup-*.exe
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4  # for when Smart App Control blocks the unsigned setup exe
+        with:
+          name: DeskSpace-stage
+          path: |
+            dist/stage
+            build/install_without_setup.py

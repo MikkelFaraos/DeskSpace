@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QLabel, QLineEdit, QWidget
 from .common import ACCENT
 from .panel import Panel
 from .sysinfo import Background, fmt_bytes
+from .system import IS_WINDOWS, run_output
 from .widgets import DIM, FAINT, WHITE, font
 
 HISTORY = 60  # seconds of speed shown in the graph
@@ -30,16 +31,20 @@ class ICMP_ECHO_REPLY(ctypes.Structure):
                 ("OptionsSize", ctypes.c_ubyte), ("OptionsData", ctypes.c_void_p)]
 
 
-_icmp = ctypes.windll.iphlpapi
-_icmp.IcmpCreateFile.restype = wintypes.HANDLE
-_icmp.IcmpSendEcho.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.WORD, ctypes.c_void_p,
-                               ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD]
-_icmp.IcmpCloseHandle.argtypes = [wintypes.HANDLE]
+if IS_WINDOWS:
+    _icmp = ctypes.windll.iphlpapi
+    _icmp.IcmpCreateFile.restype = wintypes.HANDLE
+    _icmp.IcmpSendEcho.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.WORD, ctypes.c_void_p,
+                                   ctypes.c_void_p, wintypes.DWORD, wintypes.DWORD]
+    _icmp.IcmpCloseHandle.argtypes = [wintypes.HANDLE]
 
 
 def ping(host, timeout_ms=1500):
     """Round trip to `host` in milliseconds, or None if it didn't answer. Uses Windows' own ICMP API,
     so no ping.exe window and no admin rights."""
+    if not IS_WINDOWS:
+        found = re.search(r"time[=<]([\d.]+)", run_output("ping", "-c", "1", "-W", "2", host, timeout=4))
+        return round(float(found.group(1))) if found else None
     address = struct.unpack("<I", socket.inet_aton(socket.gethostbyname(host)))[0]
     payload = b"DeskSpace ping!!"
     buf = ctypes.create_string_buffer(ctypes.sizeof(ICMP_ECHO_REPLY) + len(payload) + 8)
@@ -55,6 +60,12 @@ def ping(host, timeout_ms=1500):
 
 def wifi_info():
     """{"ssid", "signal" (percent), "rate"} for the connected Wi-Fi network, or None when not on Wi-Fi."""
+    if not IS_WINDOWS:
+        for line in run_output("nmcli", "-t", "-f", "ACTIVE,SSID,SIGNAL,RATE", "dev", "wifi").splitlines():
+            parts = line.split(":")
+            if len(parts) >= 4 and parts[0] == "yes":
+                return {"ssid": parts[1], "signal": int(parts[2]) if parts[2].isdigit() else None, "rate": parts[3]}
+        return None
     out = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, timeout=10,
                          creationflags=0x08000000).stdout  # no window
     fields = {}
@@ -221,9 +232,10 @@ class NetworkView(QWidget):
         y += 22
         p.setFont(font(11))
         p.setPen(QColor(255, 255, 255, 110))
+        line = (f"IP {stats.ip.value or '–'}   ·   session ↓ {fmt_bytes(stats.session[0])}  "
+                f"↑ {fmt_bytes(stats.session[1])}")
         p.drawText(QRectF(8, y, w - 16, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"IP {stats.ip.value or '–'}   ·   this session ↓ {fmt_bytes(stats.session[0])}  "
-                   f"↑ {fmt_bytes(stats.session[1])}")
+                   QFontMetrics(p.font()).elidedText(line, Qt.ElideMiddle, int(w - 16)))
 
 
 class NetworkFence(Panel):

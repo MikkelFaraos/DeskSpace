@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
 from .calendar_feed import CalendarFeed
 from .common import ACCENT, EDIT_STYLE, LIST_STYLE, SCROLLBAR_STYLE, load_color
 from .panel import Panel
+from .system import open_path
 
 WHITE = QColor(255, 255, 255, 235)
 DIM = QColor(255, 255, 255, 140)
@@ -378,8 +379,7 @@ class MonitorView(QWidget):
     def mousePressEvent(self, e):
         for rect, action in self.hits:
             if rect.contains(e.position()) and e.button() == Qt.LeftButton:
-                import os
-                os.startfile(action)
+                open_path(action)
                 e.accept()
                 return
         e.ignore()  # let the panel drag

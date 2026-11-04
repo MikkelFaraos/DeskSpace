@@ -1,5 +1,4 @@
-﻿"""Shared constants, paths and file helpers."""
-import ctypes
+"""Shared constants, paths and file helpers."""
 import os
 import shutil
 from pathlib import Path
@@ -7,20 +6,16 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 
+from .system import desktop_dir, is_hidden  # noqa: F401 (is_hidden is used through here too)
+
 APP_NAME = "DeskSpace"
 OLD_NAME = "DeskFences"  # the app's name before 1.1: its data folder and startup entry get moved over
-APP_VERSION = "1.3.0"  # keep in step with build\installer.iss
+APP_VERSION = "1.4.1"  # keep in step with build\installer.iss
 APP_DIR = Path(__file__).resolve().parent.parent
 ENTRY_SCRIPT = APP_DIR / "deskspace.pyw"
 
 
-def _desktop_dir():
-    buf = ctypes.create_unicode_buffer(260)
-    ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buf)  # CSIDL_DESKTOPDIRECTORY
-    return Path(buf.value)
-
-
-DESKTOP = _desktop_dir()
+DESKTOP = desktop_dir()
 PUBLIC_DESKTOP = Path(os.environ.get("PUBLIC", r"C:\Users\Public")) / "Desktop"
 OLD_DATA_ROOT = Path.home() / OLD_NAME
 
@@ -49,7 +44,7 @@ def moved_path(path):
 # Kept beside the fence folders rather than in %APPDATA%: when launched from a packaged (MSIX)
 # app, AppData writes are silently redirected into that app's private storage.
 CONFIG_PATH = DATA_ROOT / "config.json"
-LEGACY_CONFIG_PATH = Path(os.environ["APPDATA"]) / OLD_NAME / "config.json"  # from the very first versions
+LEGACY_CONFIG_PATH = Path(os.environ.get("APPDATA", Path.home())) / OLD_NAME / "config.json"  # from the very first versions
 COVER_CACHE = DATA_ROOT / ".covers"
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
@@ -61,7 +56,8 @@ ACCENT = QColor(110, 165, 255)
 
 # Order matters: it is also the order auto-sort lays out new fences.
 CATEGORIES = [
-    ("Apps", {".lnk", ".url", ".exe", ".appref-ms", ".msi", ".bat", ".cmd", ".ps1"}),
+    ("Apps", {".lnk", ".url", ".exe", ".appref-ms", ".msi", ".bat", ".cmd", ".ps1", ".desktop", ".sh", ".appimage",
+              ".deb", ".rpm"}),
     ("Folders", set()),
     ("Documents", {".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt", ".md", ".xls", ".xlsx", ".csv",
                    ".ods", ".ppt", ".pptx", ".odp", ".pages", ".numbers", ".key", ".epub"}),
@@ -102,11 +98,6 @@ def category_for(path):
     return "Other"
 
 
-def is_hidden(path):
-    attrs = ctypes.windll.kernel32.GetFileAttributesW(str(path))
-    return attrs != -1 and bool(attrs & 0x6)  # FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM
-
-
 def safe_name(name):
     cleaned = "".join("_" if c in '<>:"/\\|?*' else c for c in name).strip(" .")
     return cleaned or "Fence"
@@ -138,7 +129,7 @@ def move_into(src, folder):
 
 
 def display_name(path, limit=28):
-    name = path.stem if path.suffix.lower() in (".lnk", ".url") else path.name
+    name = path.stem if path.suffix.lower() in (".lnk", ".url", ".desktop") else path.name
     return name if len(name) <= limit else name[:limit - 2] + "…"
 
 

@@ -1,9 +1,12 @@
 """Find installed Steam games and their cover art."""
 import re
-import winreg
 from pathlib import Path
 
 from .common import COVER_CACHE
+from .system import IS_WINDOWS
+
+if IS_WINDOWS:
+    import winreg
 
 # Steam installs these alongside games; they aren't things you launch.
 NOT_GAMES = {"228980"}  # Steamworks Common Redistributables
@@ -11,7 +14,13 @@ NOT_GAME_WORDS = ("redistributable", "runtime", "proton", "steamvr")
 CDN_COVER = "https://shared.cloudflare.steamstatic.com/store_item_assets/steam/apps/{}/library_600x900.jpg"
 
 
+LINUX_ROOTS = (".steam/steam", ".local/share/Steam", ".var/app/com.valvesoftware.Steam/.local/share/Steam",
+               "snap/steam/common/.local/share/Steam")
+
+
 def steam_root():
+    if not IS_WINDOWS:
+        return next((Path.home() / r for r in LINUX_ROOTS if (Path.home() / r / "steamapps").is_dir()), None)
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
             path = Path(winreg.QueryValueEx(key, "SteamPath")[0])
@@ -22,6 +31,8 @@ def steam_root():
 
 def steam_exe():
     root = steam_root()
+    if not IS_WINDOWS:
+        return "steam" if root else None
     return root / "steam.exe" if root else None
 
 
@@ -48,6 +59,13 @@ def installed_games():
 
 def running_game():
     """The app id Steam is running right now, or None."""
+    if not IS_WINDOWS:
+        try:
+            text = (Path.home() / ".steam" / "registry.vdf").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+        found = re.search(r'"RunningAppID"\s+"(\d+)"', text)
+        return found.group(1) if found and found.group(1) != "0" else None
     try:
         with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
             return str(winreg.QueryValueEx(key, "RunningAppID")[0] or "") or None

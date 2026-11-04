@@ -2,6 +2,7 @@
 (Qt, HTTPS, the WinRT media API, pywin32/COM, calendar parsing...) without starting the app.
 Writes one line per check to the report and returns 0 when all pass."""
 import importlib
+import sys
 import traceback
 
 
@@ -51,14 +52,28 @@ def run(report_path):
         from fences.sysinfo import GpuCounters
         return GpuCounters().name or "no GPU name"
 
+    def launchers():
+        from fences.launchers import installed
+        return ", ".join(name for name, _ in installed()) or "none here"
+
+    def updates():
+        from fences.updates import read_release
+        tag = {"tag_name": "v99.0", "assets": [{"name": "DeskSpace-Setup-99.0.exe", "browser_download_url":
+               "https://github.com/MikkelFaraos/DeskSpace/releases/download/v99.0/DeskSpace-Setup-99.0.exe"}]}
+        if not read_release(tag)["url"] or read_release({"tag_name": "v0.1"}):
+            raise ValueError("version comparison")
+
     def modules():
         importlib.import_module("send2trash")
         importlib.import_module("fences.app")  # imports every feature module...
         for name in ("settings", "tidy", "cleanup", "console"):  # ...except the windows it opens on demand
             importlib.import_module(f"fences.{name}")
 
-    for name, func in (("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Media session API", media),
-                       ("COM / Windows Search", com), ("Calendar parsing", calendar), ("GPU counters", stats)):
+    checks = [("Qt + all DeskSpace modules", modules), ("HTTPS", https), ("Calendar parsing", calendar),
+              ("Game launchers", launchers), ("Updates", updates)]
+    if sys.platform == "win32":
+        checks += [("Media session API", media), ("COM / Windows Search", com), ("GPU counters", stats)]
+    for name, func in checks:
         check(name, func)
     with open(report_path, "w", encoding="utf-8") as f:
         f.write("\n".join(results) + "\n")

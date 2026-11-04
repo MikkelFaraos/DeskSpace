@@ -4,11 +4,11 @@ import copy
 import ctypes
 import fnmatch
 import json
+import os
 import random
 import sys
 import time
 import uuid
-import winreg
 from datetime import datetime
 from pathlib import Path
 
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QApplication, QFileIconProvider, QMenu, QSystemTra
 from . import dialogs, gog, steam
 from .common import (
     APP_NAME, CATEGORIES, CONFIG_PATH, COVER_CACHE, DATA_ROOT, DESKTOP, ENTRY_SCRIPT, LEGACY_CONFIG_PATH, OLD_NAME,
-    PUBLIC_DESKTOP, RUN_KEY, category_for, is_hidden, make_app_icon, move_into, safe_name,
+    PUBLIC_DESKTOP, category_for, is_hidden, make_app_icon, move_into, safe_name,
 )
 from .folder import FolderFence
 from .media import MediaBackend, MediaFence
@@ -31,9 +31,13 @@ from .preview import PreviewController
 from .search import HotkeyListener, SearchPopup
 from .sysinfo import SystemStats
 from .tabs import TabGroup
+from .updates import Updater
 from .wallpaper import WallpaperWatcher
 from .widgets import ClockFence, MonitorFence, NoteFence, TodoFence
-from .win32 import DesktopDoubleClick, pin_to_desktop, set_desktop_icons_visible, user32
+from .system import (
+    IS_WINDOWS, DesktopDoubleClick, drop_startup, hide_path, pin_to_desktop, quote_command,
+    set_desktop_icons_visible, set_startup, single_instance, startup_enabled, user32,
+)
 
 PANEL_TYPES = {"folder": FolderFence, "portal": FolderFence, "note": NoteFence, "todo": TodoFence,
                "clock": ClockFence, "monitor": MonitorFence, "media": MediaFence, "packages": PackageFence,
@@ -48,7 +52,7 @@ OPTIONS = {"locked": False, "snap": True, "snap_distance": 16, "quick_hide": Tru
            "match_wallpaper": True, "previews": True, "search_enabled": True, "search_hotkey": "Ctrl+Shift+Space",
            "pet_enabled": True, "pets": [], "pet_outfits": True, "pet_meetings": True, "track_key": "",
            "keep_delivered_days": 2, "tidy_auto": False, "tidy_days": 2, "tidy_last": 0,
-           "console_autostart": False}
+           "console_autostart": False, "update_check": True}
 PET_NAMES = ["Mochi", "Biscuit", "Pickles", "Nugget", "Pebble", "Clover", "Waffles", "Hazel", "Peanut", "Bramble",
              "Tofu", "Maple", "Juniper", "Muffin", "Pip", "Sprout"]
 # Files still being written by a browser or Office; rules leave them alone until they're final.
@@ -122,6 +126,7 @@ class DeskSpace:
         QTimer.singleShot(60000, self.daily_tidy)
         if self.console_autostart:
             QTimer.singleShot(2500, self.enter_console)
+        self.updater = Updater(self)
         # Monitors can still be coming up at login; only rescue off-screen fences once they're settled.
         QTimer.singleShot(15000, self.rescue_offscreen)
 
@@ -159,9 +164,12 @@ class DeskSpace:
         self.hide_action = menu.addAction("Hide fences", self.toggle_hidden)
         menu.addSeparator()
         menu.addAction("Settings…", self.open_settings)
+        self.update_action = menu.addAction("Install update…", lambda: self.updater.install())
+        self.update_action.setVisible(False)
         menu.addAction("Quit", self.quit)
         self.tray_menu = menu
         self.tray.setContextMenu(menu)
+        self.tray.messageClicked.connect(lambda: self.updater.install())
         self.tray.activated.connect(
             lambda reason: self.toggle_hidden() if reason == QSystemTrayIcon.DoubleClick else None)
         self.tray.show()
@@ -265,6 +273,7 @@ class DeskSpace:
 
     def toggle_hidden(self):
         if self.console_active:
+            self.console.come_back()
             return
         self.hidden = not self.hidden
         for f in self.fences:
@@ -373,38 +382,24 @@ class DeskSpace:
         QTimer.singleShot(1200, lambda: (setattr(panel, "drop_hover", False), panel.update()))
 
     def startup_command(self):
+        # Linux installs start us through their own launcher, which is what should run at sign-in.
+        if os.environ.get("DESKSPACE_LAUNCHER"):
+            return os.environ["DESKSPACE_LAUNCHER"]
         # Installed: runtime\DeskSpace.exe (a renamed, signed pythonw.exe). Dev: the venv's pythonw.exe.
         exe = Path(sys.executable)
         if exe.name.lower() == "python.exe":
             exe = exe.with_name("pythonw.exe")  # no console window at sign-in
-        return f'"{exe}" "{ENTRY_SCRIPT}"'
+        return quote_command(exe, ENTRY_SCRIPT)
 
     def startup_enabled(self):
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY) as key:
-                winreg.QueryValueEx(key, APP_NAME)
-            return True
-        except OSError:
-            return False
+        return startup_enabled(APP_NAME)
 
     def drop_old_startup_entry(self):
         """Remove the start-with-Windows entry from before the rename; True if there was one."""
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-                winreg.DeleteValue(key, OLD_NAME)
-            return True
-        except OSError:
-            return False
+        return drop_startup(OLD_NAME)
 
     def set_startup(self, on):
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-            if on:
-                winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, self.startup_command())
-            else:
-                try:
-                    winreg.DeleteValue(key, APP_NAME)
-                except OSError:
-                    pass
+        set_startup(APP_NAME, self.startup_command(), on)
 
     # -- panels
 
@@ -433,7 +428,7 @@ class DeskSpace:
 
     def check_desktop(self):
         progman = user32.FindWindowW("Progman", None)
-        if not progman or self.hidden or self.console_active:
+        if not IS_WINDOWS or not progman or self.hidden or self.console_active:
             return
         for i, panel in enumerate(list(self.fences)):
             hwnd = int(panel.winId())
@@ -521,6 +516,11 @@ class DeskSpace:
         from ctypes import wintypes
         for panel in self.fences:
             if panel is moving or not panel.isVisible():
+                continue
+            if not IS_WINDOWS:  # pt is a QPoint here, in the same units as Qt's own geometry
+                g = panel.geometry()
+                if g.left() <= pt.x() <= g.right() and g.top() <= pt.y() < g.top() + panel.title_h:
+                    return panel
                 continue
             rc = wintypes.RECT()
             user32.GetWindowRect(int(panel.winId()), ctypes.byref(rc))
@@ -645,7 +645,7 @@ class DeskSpace:
         if reply.error() != QNetworkReply.NoError or not data:
             return
         COVER_CACHE.mkdir(parents=True, exist_ok=True)
-        ctypes.windll.kernel32.SetFileAttributesW(str(COVER_CACHE), 0x2)  # hidden
+        hide_path(COVER_CACHE)
         (COVER_CACHE / (filename or f"{appid}.jpg")).write_bytes(data)
         if self.console is not None:
             self.console.covers_changed()
@@ -705,13 +705,12 @@ class DeskSpace:
 
 
 def main():
-    # Only one instance at a time; keep the handle alive for the life of the process.
-    global _mutex
-    kernel32 = ctypes.windll.kernel32
-    _mutex = kernel32.CreateMutexW(None, False, "Local\\DeskSpaceSingleInstance")
-    if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    if not IS_WINDOWS:  # Wayland doesn't let apps place windows, so use X11 (XWayland there)
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+    if not single_instance():
         return
-    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_NAME)
+    if IS_WINDOWS:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_NAME)
     qapp = QApplication(sys.argv)
     qapp.setQuitOnLastWindowClosed(False)
     qapp.setWindowIcon(make_app_icon())

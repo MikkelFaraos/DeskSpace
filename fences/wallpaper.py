@@ -1,16 +1,36 @@
 """Fence colours matched to the desktop wallpaper."""
 import ctypes
 import os
+import shlex
 from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QImage
 
+from .system import IS_WINDOWS, run_output
+
 # Windows keeps a copy of whatever is on the desktop right now (including slideshow and Spotlight).
-TRANSCODED = Path(os.environ["APPDATA"]) / "Microsoft" / "Windows" / "Themes" / "TranscodedWallpaper"
+TRANSCODED = Path(os.environ.get("APPDATA", Path.home())) / "Microsoft" / "Windows" / "Themes" / "TranscodedWallpaper"
+
+
+def linux_wallpaper():
+    """The wallpaper picture on Cinnamon (Mint) or GNOME (Ubuntu), or None."""
+    keys = (("org.cinnamon.desktop.background", "picture-uri"), ("org.gnome.desktop.background", "picture-uri-dark"),
+            ("org.gnome.desktop.background", "picture-uri"))
+    for schema, key in keys:
+        value = run_output("gsettings", "get", schema, key).strip()
+        words = shlex.split(value) if value else []
+        if words and words[0].startswith("file://"):
+            path = Path(unquote(urlparse(words[0]).path))
+            if path.exists():
+                return path
+    return None
 
 
 def wallpaper_file():
+    if not IS_WINDOWS:
+        return linux_wallpaper()
     if TRANSCODED.exists():
         return TRANSCODED
     buf = ctypes.create_unicode_buffer(512)

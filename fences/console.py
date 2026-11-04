@@ -1,12 +1,14 @@
 """Console mode: a full-screen home screen for a PC on a TV, made to be used from the sofa.
 
-Your Steam and GOG games as a big cover grid (recently played first), a System page with volume
-and power, and your pets walking along the bottom bar. Works with an Xbox-style controller, the
-keyboard and the mouse. Starting a game gets out of the way; when the game ends the console comes
-back by itself, and holding Back + Start brings it back at any time.
+Your Steam and GOG games as a big cover grid (recently played first), a System page with volume,
+game launchers and power, and your pets walking along the bottom bar. Works with an Xbox-style
+controller, the keyboard and the mouse. Starting a game gets out of the way; when the game ends the
+console comes back by itself. Minimized or closed from Windows it keeps running in the background,
+and holding Back + Start or using the tray icon brings it back at any time.
 """
 import ctypes
 import os
+import struct
 import subprocess
 import time
 from ctypes import wintypes
@@ -16,11 +18,11 @@ from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QWidget
 
-from . import gog, pet, steam
+from . import gog, launchers, pet, steam
 from .common import ACCENT, APP_NAME
 from .dialogs import bring_to_front
 from .folder import make_tile
-from .win32 import user32
+from .system import IS_WINDOWS, linux_get_volume, linux_set_volume, open_path, run_output, user32
 
 WHITE = QColor(255, 255, 255, 240)
 DIM = QColor(255, 255, 255, 150)
@@ -43,7 +45,7 @@ def load_games():
 
 def launch(game):
     if game["source"] == "Steam":
-        os.startfile(f"steam://rungameid/{game['id']}")
+        open_path(f"steam://rungameid/{game['id']}")
     else:
         gog.run_game(game["game"])
 
@@ -107,6 +109,8 @@ def _endpoint_volume():
 
 def get_volume():
     """(level 0..1, muted), or None if there are no speakers."""
+    if not IS_WINDOWS:
+        return linux_get_volume()
     volume = _endpoint_volume()
     if not volume:
         return None
@@ -120,6 +124,9 @@ def get_volume():
 
 
 def set_volume(level):
+    if not IS_WINDOWS:
+        linux_set_volume(level)
+        return
     volume = _endpoint_volume()
     if volume:
         try:
@@ -142,6 +149,9 @@ def enable_shutdown_privilege():
 
 
 def sleep_pc():
+    if not IS_WINDOWS:
+        subprocess.Popen(["systemctl", "suspend"])
+        return
     enable_shutdown_privilege()
     if not ctypes.windll.powrprof.SetSuspendState(False, False, False):
         # PCs with Modern Standby can't be told to sleep this way, but do once the screen goes off.
@@ -149,11 +159,13 @@ def sleep_pc():
 
 
 def restart_pc():
-    subprocess.Popen(["shutdown", "/r", "/t", "0"], creationflags=0x08000000)
+    subprocess.Popen(["shutdown", "/r", "/t", "0"] if IS_WINDOWS else ["systemctl", "reboot"],
+                     creationflags=0x08000000 if IS_WINDOWS else 0)
 
 
 def shutdown_pc():
-    subprocess.Popen(["shutdown", "/s", "/t", "0"], creationflags=0x08000000)
+    subprocess.Popen(["shutdown", "/s", "/t", "0"] if IS_WINDOWS else ["systemctl", "poweroff"],
+                     creationflags=0x08000000 if IS_WINDOWS else 0)
 
 
 # -- controller
@@ -177,6 +189,52 @@ STICK = 16000
 REPEAT_FIRST, REPEAT_NEXT = 0.38, 0.11
 
 
+class LinuxJoystick:
+    """The kernel's joystick device: reads the controller's button and stick changes as they arrive.
+    Button and axis numbers are the ones Xbox-style controllers get from Linux's xpad driver."""
+    BUTTONS = {0: A, 1: B, 2: X, 3: Y, 4: LB, 5: RB, 6: BACK, 7: START}
+    EVENT = struct.Struct("IhBB")  # time, value, type, number
+    PATH = "/dev/input/js{}"
+
+    def __init__(self):
+        self.file = None
+        self.buttons = 0
+        self.axes = {}
+
+    def connect(self):
+        for i in range(4):
+            try:
+                self.file = os.open(self.PATH.format(i), os.O_RDONLY | os.O_NONBLOCK)
+                self.buttons, self.axes = 0, {}
+                return True
+            except OSError:
+                continue
+        return False
+
+    def read(self):
+        """The buttons held now, or None once the controller is gone."""
+        while True:
+            try:
+                data = os.read(self.file, self.EVENT.size)
+            except BlockingIOError:
+                break
+            except OSError:
+                data = b""
+            if len(data) < self.EVENT.size:
+                os.close(self.file)
+                self.file = None
+                return None
+            _, value, kind, number = self.EVENT.unpack(data)
+            kind &= 0x7f  # without the "initial state" flag
+            if kind == 1 and number in self.BUTTONS:
+                self.buttons = self.buttons | self.BUTTONS[number] if value else self.buttons & ~self.BUTTONS[number]
+            elif kind == 2:
+                self.axes[number] = value
+        lx, ly, hat_x, hat_y = (self.axes.get(n, 0) for n in (0, 1, 6, 7))
+        held = self.buttons | (LEFT if lx < -STICK or hat_x < 0 else 0) | (RIGHT if lx > STICK or hat_x > 0 else 0)
+        return held | (UP if ly < -STICK or hat_y < 0 else 0) | (DOWN if ly > STICK or hat_y > 0 else 0)
+
+
 class Gamepad(QObject):
     """Polls the first connected Xbox-style controller."""
     action = Signal(str)
@@ -185,7 +243,8 @@ class Gamepad(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.xinput = None
-        for name in ("xinput1_4", "xinput9_1_0"):
+        self.joystick = None if IS_WINDOWS else LinuxJoystick()
+        for name in ("xinput1_4", "xinput9_1_0") if IS_WINDOWS else ():
             try:
                 self.xinput = getattr(ctypes.windll, name)
                 break
@@ -196,10 +255,11 @@ class Gamepad(QObject):
         self.last = 0
         self.held_since = {}
         self.chord_since = None
+        self.last_awake = 0.0
         self.timer = QTimer(self, interval=25, timeout=self.poll)
 
     def start(self):
-        if self.xinput:
+        if self.xinput or self.joystick:
             self.timer.start()
 
     def read(self, slot):
@@ -214,7 +274,23 @@ class Gamepad(QObject):
         self.next_scan = now + 2
         return next((i for i in range(4) if self.read(i)), None)
 
+    def poll_linux(self):
+        js = self.joystick
+        if js.file is None:
+            now = time.monotonic()
+            if now < self.next_scan or not js.connect():
+                self.next_scan = max(self.next_scan, now + 2) if now >= self.next_scan else self.next_scan
+                return
+        buttons = js.read()
+        if buttons is None:
+            self.last, self.held_since, self.chord_since = 0, {}, None
+            return
+        self.handle(buttons, time.monotonic())
+
     def poll(self):
+        if not IS_WINDOWS:
+            self.poll_linux()
+            return
         if self.slot is None:
             self.slot = self.find()
             if self.slot is None:
@@ -230,10 +306,18 @@ class Gamepad(QObject):
         buttons |= (LEFT if pad.sThumbLX < -STICK else 0) | (RIGHT if pad.sThumbLX > STICK else 0)
         self.handle(buttons, time.monotonic())
 
+    def keep_awake(self, now):
+        """Controllers don't count as input to the system, so keep the TV and PC awake ourselves."""
+        if IS_WINDOWS:
+            ctypes.windll.kernel32.SetThreadExecutionState(0x3)
+        elif now - self.last_awake > 30:
+            self.last_awake = now
+            run_output("xdg-screensaver", "reset")
+
     def handle(self, buttons, now):
         if buttons:
             pet.pad_activity = now
-            ctypes.windll.kernel32.SetThreadExecutionState(0x3)  # keep the TV and PC awake while you use it
+            self.keep_awake(now)
         if buttons & BACK and buttons & START:
             if self.chord_since is None:
                 self.chord_since = now
@@ -278,6 +362,7 @@ class ConsoleWindow(QWidget):
         self.page = 0
         self.index = 0
         self.row = 0  # selected row on the System page
+        self.launchers = None  # [(name, program)] while the System page lists them
         self.scroll = 0.0
         self.target = 0.0
         self.confirm = None  # (question, action) waiting for a yes
@@ -347,7 +432,8 @@ class ConsoleWindow(QWidget):
         self.pad.start()
         self.clock.start()
         # Steam and friends may still be opening their windows after sign-in.
-        QTimer.singleShot(8000, lambda: self.isVisible() and not self.playing and bring_to_front(self))
+        QTimer.singleShot(8000, lambda: self.isVisible() and not self.isMinimized() and not self.playing
+                          and bring_to_front(self))
 
     def show_home(self):
         self.showFullScreen()
@@ -364,6 +450,12 @@ class ConsoleWindow(QWidget):
         self.playing = None
         self.setCursor(Qt.ArrowCursor)
         self.hide()
+
+    def closeEvent(self, e):
+        """Closing it from outside (Alt+F4, the taskbar) only steps aside: "Exit to desktop" is the way out."""
+        if self.app.console_active and e.spontaneous():
+            e.ignore()
+            self.showMinimized()
 
     def pets_on(self):
         app = self.app
@@ -461,6 +553,7 @@ class ConsoleWindow(QWidget):
     def set_page(self, page):
         self.page = page % len(PAGES)
         self.row = 0
+        self.launchers = None
         self.refresh_volume()
         self.update()
 
@@ -484,11 +577,28 @@ class ConsoleWindow(QWidget):
         self.update()
 
     def system_rows(self):
+        if self.launchers is not None:
+            return [(name, lambda p=program: self.open_launcher(p)) for name, program in self.launchers] \
+                + [("Back", self.close_launchers)]
         return [("Volume", None),
+                ("Game launchers", self.show_launchers),
+                ("Minimize (hold Back + Start to return)", self.showMinimized),
                 ("Sleep", self.do_sleep),
                 ("Restart", lambda: self.ask("Restart the PC?", restart_pc)),
                 ("Shut down", lambda: self.ask("Shut down the PC?", shutdown_pc)),
                 ("Exit to desktop", self.app.exit_console)]
+
+    def show_launchers(self):
+        self.launchers = launchers.installed()
+        self.row = 0
+
+    def close_launchers(self):
+        self.launchers = None
+        self.row = 1
+
+    def open_launcher(self, program):
+        launchers.start(program)
+        self.showMinimized()
 
     def do_sleep(self):
         sleep_pc()
@@ -500,12 +610,12 @@ class ConsoleWindow(QWidget):
     def do_system(self, action):
         rows = self.system_rows()
         if action == "back":
-            self.set_page(0)
+            self.set_page(0) if self.launchers is None else self.close_launchers()
         elif action == "up":
             self.row = max(0, self.row - 1)
         elif action == "down":
             self.row = min(len(rows) - 1, self.row + 1)
-        elif action in ("left", "right") and self.row == 0:
+        elif action in ("left", "right") and self.row == 0 and self.launchers is None:
             self.change_volume(0.05 if action == "right" else -0.05)
         elif action == "ok" and rows[self.row][1]:
             rows[self.row][1]()
@@ -680,8 +790,10 @@ class ConsoleWindow(QWidget):
         width = min(self.u(900), self.width() - 2 * self.margin())
         left = (self.width() - width) / 2
         y = self.grid_top() + self.u(20)
-        height = self.u(96)
-        for i, (name, _) in enumerate(self.system_rows()):
+        rows = self.system_rows()
+        gap = self.u(18)
+        height = min(self.u(96), (self.bar_top() - y - gap) / len(rows) - gap)
+        for i, (name, _) in enumerate(rows):
             rect = QRectF(left, y, width, height)
             chosen = i == self.row
             p.setPen(QPen(ACCENT, self.u(4)) if chosen else Qt.NoPen)
@@ -691,9 +803,9 @@ class ConsoleWindow(QWidget):
             p.setPen(WHITE)
             p.drawText(rect.adjusted(self.u(32), 0, 0, 0), Qt.AlignLeft | Qt.AlignVCenter, name)
             self.hits.append((rect, ("row", i)))
-            if i == 0:
+            if i == 0 and self.launchers is None:
                 self.paint_volume(p, rect)
-            y += height + self.u(18)
+            y += height + gap
 
     def paint_volume(self, p, rect):
         track = QRectF(rect.left() + self.u(210), rect.center().y() - self.u(7), rect.width() - self.u(350), self.u(14))
@@ -738,7 +850,8 @@ class ConsoleWindow(QWidget):
         pad = self.using_pad
         if self.page == 0:
             return [("A" if pad else "Enter", "Play"), ("LB/RB" if pad else "Tab", "System")]
-        return [("A" if pad else "Enter", "Select"), ("B" if pad else "Esc", "Games")]
+        back = "Games" if self.launchers is None else "Back"
+        return [("A" if pad else "Enter", "Select"), ("B" if pad else "Esc", back)]
 
     def paint_hint(self, p, right, rect, button, text):
         """One button hint, ending at `right`; returns where the next one should end."""

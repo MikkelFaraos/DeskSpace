@@ -6,6 +6,7 @@ Old downloads go to the Recycle Bin (recoverable); the other categories are dele
 import ctypes
 import os
 import shutil
+import tempfile
 import threading
 import time
 from ctypes import wintypes
@@ -22,13 +23,16 @@ from . import dialogs
 from .common import APP_NAME, make_app_icon
 from .dialogs import bring_to_front
 from .sysinfo import fmt_bytes
+from .system import IS_WINDOWS, ROOT_DISK, open_path
 
 DAY = 86400
-TEMP = Path(os.environ.get("TEMP", Path.home() / "AppData" / "Local" / "Temp"))
-LOCAL = Path(os.environ["LOCALAPPDATA"])
+TEMP = Path(tempfile.gettempdir())
+LOCAL = Path(os.environ.get("LOCALAPPDATA", Path.home()))
+LINUX_TRASH = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "Trash"
 DOWNLOADS = Path.home() / "Downloads"
-CRASH_DIRS = [LOCAL / "CrashDumps", LOCAL / "Microsoft" / "Windows" / "WER" / "ReportArchive",
-              LOCAL / "Microsoft" / "Windows" / "WER" / "ReportQueue"]
+CRASH_DIRS = ([LOCAL / "CrashDumps", LOCAL / "Microsoft" / "Windows" / "WER" / "ReportArchive",
+               LOCAL / "Microsoft" / "Windows" / "WER" / "ReportQueue"] if IS_WINDOWS
+              else [Path.home() / ".local/share/apport/coredump", Path("/var/crash")])
 
 
 class SHQUERYRBINFO(ctypes.Structure):
@@ -36,9 +40,21 @@ class SHQUERYRBINFO(ctypes.Structure):
 
 
 def recycle_bin():
+    if not IS_WINDOWS:
+        files = entries(LINUX_TRASH / "files")
+        return len(files), sum(size_of(p) for p in files)
     info = SHQUERYRBINFO(cbSize=ctypes.sizeof(SHQUERYRBINFO))
     ctypes.windll.shell32.SHQueryRecycleBinW(None, ctypes.byref(info))
     return info.i64NumItems, info.i64Size
+
+
+def empty_recycle_bin():
+    if IS_WINDOWS:
+        ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 0x7)  # no confirm/progress/sound
+        return
+    for folder in ("files", "info"):
+        for p in entries(LINUX_TRASH / folder):
+            delete(p)
 
 
 def size_of(path):
@@ -162,9 +178,10 @@ class CleanupWindow(QWidget):
         layout.addWidget(box, 1)
 
         buttons = QHBoxLayout()
-        storage = QPushButton("Windows storage settings…")
-        storage.clicked.connect(lambda: os.startfile("ms-settings:storagesense"))
-        buttons.addWidget(storage)
+        if IS_WINDOWS:
+            storage = QPushButton("Windows storage settings…")
+            storage.clicked.connect(lambda: open_path("ms-settings:storagesense"))
+            buttons.addWidget(storage)
         buttons.addStretch(1)
         self.clean_button = QPushButton("Clean up")
         self.clean_button.clicked.connect(self.clean)
@@ -184,8 +201,9 @@ class CleanupWindow(QWidget):
         self.clean_button.setText("Measuring…")
         for label in self.sizes.values():
             label.setText("…")
-        disk = psutil.disk_usage("C:\\")
-        self.free.setText(f"Drive C: {fmt_bytes(disk.free)} free of {fmt_bytes(disk.total)}")
+        disk = psutil.disk_usage(ROOT_DISK)
+        self.free.setText(f"{'Drive C:' if IS_WINDOWS else 'Disk:'} {fmt_bytes(disk.free)} free of "
+                          f"{fmt_bytes(disk.total)}")
         self.scanner.scan()
 
     def show_result(self, result):
@@ -241,7 +259,7 @@ class CleanupWindow(QWidget):
         if not chosen or not dialogs.ask("This will:\n\n• " + "\n• ".join(chosen) +
                                          f"\n\nAbout {fmt_bytes(self.total())} in total. Continue?"):
             return
-        before = psutil.disk_usage("C:\\").free
+        before = psutil.disk_usage(ROOT_DISK).free
         self.clean_button.setEnabled(False)
         self.clean_button.setText("Cleaning…")
         plan = {key: self.checks[key].isChecked() for key in ("recycle", "temp", "crash")}
@@ -250,7 +268,7 @@ class CleanupWindow(QWidget):
         def run():
             # Empty the Recycle Bin *before* old downloads go into it, so they stay recoverable.
             if plan["recycle"]:
-                ctypes.windll.shell32.SHEmptyRecycleBinW(None, None, 0x7)  # no confirm/progress/sound
+                empty_recycle_bin()
             if plan["temp"]:
                 for p in temp:
                     delete(p)
@@ -264,7 +282,7 @@ class CleanupWindow(QWidget):
                         send2trash(path)
                     except OSError:
                         pass
-            self.finished_cleaning.emit(psutil.disk_usage("C:\\").free - before)
+            self.finished_cleaning.emit(psutil.disk_usage(ROOT_DISK).free - before)
         threading.Thread(target=run, daemon=True).start()
 
     def on_cleaned(self, freed):

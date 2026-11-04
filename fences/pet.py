@@ -16,11 +16,11 @@ import time
 from ctypes import wintypes
 from datetime import date
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
-from .win32 import pin_to_desktop, user32
+from .system import IS_WINDOWS, pin_to_desktop, user32
 
 W, H = 90, 104
 FOOT = QPointF(W / 2, H - 4)  # where the feet touch the ground, in window coordinates
@@ -69,7 +69,16 @@ def round_pen(color, width):
 pad_activity = 0.0  # when a game controller was last used: Windows doesn't count that as input
 
 
+mouse_seen = (None, 0.0)  # Linux has no "last input" call: where the mouse last was, and when it moved
+
+
 def idle_seconds():
+    if not IS_WINDOWS:
+        global mouse_seen
+        pos = QCursor.pos()
+        if pos != mouse_seen[0]:
+            mouse_seen = (pos, time.monotonic())
+        return time.monotonic() - max(mouse_seen[1], pad_activity)
     info = LASTINPUTINFO(cbSize=ctypes.sizeof(LASTINPUTINFO))
     user32.GetLastInputInfo(ctypes.byref(info))
     return min((ctypes.windll.kernel32.GetTickCount() - info.dwTime) / 1000, time.monotonic() - pad_activity)
@@ -112,6 +121,9 @@ def find_platforms(app, x, y):
 
 def stay_above_fences(app, widget):
     # Fences and pets all sit at desktop level; keep this one on top of the fences there.
+    if not IS_WINDOWS:
+        widget.raise_()
+        return
     me = int(widget.winId())
     for panel in app.fences:
         if panel.isVisible():
@@ -390,12 +402,15 @@ class Ball(DesktopThing):
 
 
 class Pet(QWidget):
+    FLAGS = Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnBottomHint
+
     def __init__(self, app, info):
-        super().__init__(None, Qt.FramelessWindowHint | Qt.Tool | Qt.WindowStaysOnBottomHint)
+        super().__init__(None, self.FLAGS)
         self.app = app
         self.info = info  # {"kind", "color", "name"}: the pet's entry in the app's pet list, edited in place
         self.scale = 1.0
         self.stage = None  # the Console mode window we're on, instead of the desktop
+        self.origin = QPoint(0, 0)  # where our window coordinates start: the screen, or the console
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.resize(W, H)
         screen = QApplication.primaryScreen().availableGeometry()
@@ -425,7 +440,8 @@ class Pet(QWidget):
         self.place()
         self.show()
         if self.stage:  # an owned window stays above its owner, and hides when that's minimized
-            user32.SetWindowLongPtrW(int(self.winId()), -8, self.stage)
+            if IS_WINDOWS:
+                user32.SetWindowLongPtrW(int(self.winId()), -8, self.stage)
             self.lift()  # owning doesn't move it: Qt opened us at the bottom of the stack
         else:
             pin_to_desktop(int(self.winId()))
@@ -436,9 +452,18 @@ class Pet(QWidget):
     def set_stage(self, hwnd, scale, floor):
         """Move onto the Console mode window at this size (hwnd None: back to the desktop)."""
         self.stage, self.scale = hwnd, scale
-        # Stays-on-bottom forces the window down on every move, and Windows then drags its owner
-        # down with it: left on, it sinks the whole console below every other window.
-        self.setWindowFlag(Qt.WindowStaysOnBottomHint, not hwnd)
+        if IS_WINDOWS:
+            # Stays-on-bottom forces the window down on every move, and Windows then drags its owner
+            # down with it: left on, it sinks the whole console below every other window.
+            self.setWindowFlag(Qt.WindowStaysOnBottomHint, not hwnd)
+        elif hwnd:  # window managers stack full-screen windows over everything, so draw inside it
+            self.setParent(self.app.console)
+            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+            self.origin = self.app.console.pos()
+        else:
+            self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+            self.setParent(None, self.FLAGS)
+            self.origin = QPoint(0, 0)
         self.resize(int(W * scale), int(H * scale))
         self.fy = float(floor)
         self.vx, self.vy = 0.0, 0.0
@@ -471,14 +496,18 @@ class Pet(QWidget):
     def stay_above_fences(self):
         if not self.stage:
             stay_above_fences(self.app, self)
-        elif user32.GetForegroundWindow() == self.stage:  # not over other apps you've switched to
+        elif self.app.console.isActiveWindow():  # not over other apps you've switched to
             self.lift()
 
     def lift(self):
-        user32.SetWindowPos(int(self.winId()), 0, 0, 0, 0, 0, 0x13)  # HWND_TOP, NOSIZE|NOMOVE|NOACTIVATE
+        if IS_WINDOWS:
+            user32.SetWindowPos(int(self.winId()), 0, 0, 0, 0, 0, 0x13)  # HWND_TOP, NOSIZE|NOMOVE|NOACTIVATE
+        else:
+            self.raise_()
 
     def place(self):
-        self.move(int(self.fx - FOOT.x() * self.scale), int(self.fy - FOOT.y() * self.scale))
+        self.move(int(self.fx - FOOT.x() * self.scale) - self.origin.x(),
+                  int(self.fy - FOOT.y() * self.scale) - self.origin.y())
         if self.bubble is not None:
             sp = self.spec()
             top = self.fy - (sp["legs"] + sp["body"][1] + sp["heart"] + 8) * self.scale

@@ -1,6 +1,5 @@
 """The Settings window: app-wide options on a General page, plus one page per fence/widget.
 Changes apply immediately; there's nothing to save or cancel."""
-import os
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QKeySequence
@@ -10,9 +9,10 @@ from PySide6.QtWidgets import (
 )
 
 from . import dialogs
-from .common import APP_NAME, DATA_ROOT, make_app_icon
+from .common import APP_NAME, APP_VERSION, DATA_ROOT, make_app_icon
 from .dialogs import bring_to_front
 from .pet import PALETTES, SPECIES
+from .system import IS_WINDOWS, open_path
 
 MAX_PETS = 8
 GENERAL = object()  # selects the General page (its entry in the list is None)
@@ -118,7 +118,8 @@ class SettingsWindow(QWidget):
         boxes = []
 
         box, form = group("Startup && behaviour")
-        form.addRow(checkbox("Start DeskSpace with Windows", app.startup_enabled(), app.set_startup))
+        form.addRow(checkbox(f"Start DeskSpace with {'Windows' if IS_WINDOWS else 'the desktop'}", app.startup_enabled(),
+                             app.set_startup))
         form.addRow(checkbox("Lock fence positions and sizes", app.locked, lambda on: app.set_option("locked", on)))
         snap_row = QHBoxLayout()
         distance = QSpinBox()
@@ -135,12 +136,13 @@ class SettingsWindow(QWidget):
         form.addRow(snap_row)
         boxes.append(box)
 
-        box, form = group("Quick-hide")
+        box, form = group("Quick-hide" if IS_WINDOWS else "Hide all fences")
         icons = checkbox("Also hide the desktop icons", app.hide_icons, lambda on: app.set_option("hide_icons", on))
         icons.setEnabled(app.quick_hide)
-        form.addRow(checkbox("Double-click an empty spot on the desktop to hide/show all fences", app.quick_hide,
-                             lambda on: (app.set_option("quick_hide", on), icons.setEnabled(on))))
-        form.addRow(icons)
+        if IS_WINDOWS:
+            form.addRow(checkbox("Double-click an empty spot on the desktop to hide/show all fences", app.quick_hide,
+                                 lambda on: (app.set_option("quick_hide", on), icons.setEnabled(on))))
+            form.addRow(icons)
         form.addRow(hint("You can also double-click the tray icon."))
         boxes.append(box)
 
@@ -166,16 +168,20 @@ class SettingsWindow(QWidget):
         enabled = checkbox("Open quick search with a keyboard shortcut:", app.search_enabled,
                            lambda on: (app.set_option("search_enabled", on), keys.setEnabled(on), apply_hotkey()))
         keys.setEnabled(app.search_enabled)
-        row = QHBoxLayout()
-        row.addWidget(enabled)
-        row.addWidget(keys)
-        row.addStretch(1)
-        form.addRow(row)
-        form.addRow(status)
-        form.addRow(hint("Finds apps, fence items, desktop items and files. Enter opens, Ctrl+Enter shows it in "
-                         "Explorer, Esc closes. Needs a modifier like Ctrl, Alt or Shift."))
-        if app.search_enabled and not app.hotkey.registered:
-            status.setText("That shortcut is already used by another program - try a different one.")
+        if IS_WINDOWS:
+            row = QHBoxLayout()
+            row.addWidget(enabled)
+            row.addWidget(keys)
+            row.addStretch(1)
+            form.addRow(row)
+            form.addRow(status)
+            form.addRow(hint("Finds apps, fence items, desktop items and files. Enter opens, Ctrl+Enter shows it in "
+                             "Explorer, Esc closes. Needs a modifier like Ctrl, Alt or Shift."))
+            if app.search_enabled and not app.hotkey.registered:
+                status.setText("That shortcut is already used by another program - try a different one.")
+        else:
+            form.addRow(hint("Open it from the tray icon. It finds apps, fence items, desktop items and files. "
+                             "Enter opens, Ctrl+Enter shows it in the file manager, Esc closes."))
         boxes.append(box)
 
         box, form = group("Desktop pets")
@@ -211,6 +217,18 @@ class SettingsWindow(QWidget):
         form.addRow(hint("A full-screen home screen with your Steam and GOG games, your pets, volume and power, for "
                          "a controller or keyboard. Hold Back + Start on the controller to return to it from "
                          "anywhere. Leave it from System → Exit to desktop."))
+        boxes.append(box)
+
+        box, form = group("Updates")
+        form.addRow(checkbox("Check for new versions once a day", app.update_check,
+                             lambda on: app.set_option("update_check", on)))
+        update = QPushButton("Check now")
+        update.clicked.connect(lambda: app.updater.check(quiet=False))
+        update_row = QHBoxLayout()
+        update_row.addWidget(update)
+        update_row.addWidget(QLabel(f"You have version {APP_VERSION}"))
+        update_row.addStretch(1)
+        form.addRow(update_row)
         boxes.append(box)
 
         box, form = group("File tidy")
@@ -256,7 +274,7 @@ class SettingsWindow(QWidget):
         auto.clicked.connect(app.auto_sort)
         actions.addWidget(auto)
         data = QPushButton("Open data folder")
-        data.clicked.connect(lambda: os.startfile(DATA_ROOT))
+        data.clicked.connect(lambda: open_path(DATA_ROOT))
         actions.addWidget(data)
         actions.addStretch(1)
         form.addRow(actions)

@@ -5,14 +5,18 @@ import re
 import subprocess
 import threading
 import time
-import winreg
+from pathlib import Path
 
 import psutil
-import pywintypes
-import win32pdh
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .win32 import gpu_adapters
+from .system import IS_WINDOWS, NO_WINDOW, ROOT_DISK, gpu_adapters, run_output
+
+if IS_WINDOWS:
+    import winreg
+
+    import pywintypes
+    import win32pdh
 
 
 def fmt_bytes(n, per_second=False):
@@ -44,6 +48,9 @@ class GpuCounters:
         adapters = gpu_adapters()
         best = max(adapters, key=lambda a: a[1]) if adapters else None  # the card with the most VRAM
         self.name, self.vram_total, self.luid = best or ("", 0, None)
+        self.ok = False
+        if not IS_WINDOWS:
+            return
         try:
             self.query = win32pdh.OpenQuery()
             self.util = win32pdh.AddEnglishCounter(self.query, r"\GPU Engine(*)\Utilization Percentage")
@@ -84,6 +91,8 @@ class HardwareTemps:
         self.next_try = 0.0
 
     def sample(self):
+        if not IS_WINDOWS:
+            return linux_temperatures()
         if self.wmi is None:
             if time.monotonic() < self.next_try:
                 return None, None
@@ -113,6 +122,15 @@ class HardwareTemps:
         return cpu, gpu
 
 
+def linux_temperatures():
+    """(CPU, GPU) in °C from the kernel's sensors; either may be None."""
+    sensors = psutil.sensors_temperatures() if hasattr(psutil, "sensors_temperatures") else {}
+    cpu = next((s.current for name in ("coretemp", "k10temp", "zenpower", "cpu_thermal") for s in sensors.get(name, [])),
+               None)
+    gpu = next((s.current for name in ("amdgpu", "nouveau", "radeon") for s in sensors.get(name, [])), None)
+    return cpu, gpu
+
+
 class Background:
     """Runs a slow check on a worker thread every `every` seconds; `value` holds the latest result."""
 
@@ -139,6 +157,8 @@ class Background:
 
 def pending_updates():
     """Number of Windows updates waiting to install, from Windows Update's last scan (no new scan)."""
+    if not IS_WINDOWS:
+        return sum("/" in line for line in run_output("apt", "list", "--upgradable", timeout=60).splitlines())
     import pythoncom
     import win32com.client
     pythoncom.CoInitialize()
@@ -151,6 +171,8 @@ def pending_updates():
 
 
 def restart_needed():
+    if not IS_WINDOWS:
+        return Path("/var/run/reboot-required").exists()
     for path in (r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
                  r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"):
         try:
@@ -170,8 +192,10 @@ Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -like 'BTH*' } | ForEa
 
 def bluetooth_batteries():
     """{device name: percent} for Bluetooth devices that report their battery to Windows."""
+    if not IS_WINDOWS:
+        return linux_device_batteries()
     out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", BLUETOOTH_BATTERY],
-                         capture_output=True, text=True, timeout=90, creationflags=0x08000000).stdout  # no window
+                         capture_output=True, text=True, timeout=90, creationflags=NO_WINDOW).stdout
     levels = {}
     for line in out.splitlines():
         name, _, value = line.rpartition("|")
@@ -179,6 +203,19 @@ def bluetooth_batteries():
             # One headset shows up as several services ("... Hands-Free AG", "... Avrcp Transport").
             name = re.sub(r"\s+(Hands-Free( AG)?|Avrcp Transport|Stereo|A2DP.*|LE)$", "", name.strip())
             levels[name] = max(levels.get(name, 0), int(value))
+    return levels
+
+
+def linux_device_batteries():
+    levels = {}
+    for device in run_output("upower", "-e").splitlines():
+        if "DisplayDevice" in device or "/battery_" in device or "/line_power" in device:
+            continue  # the PC's own battery has its own row
+        info = run_output("upower", "-i", device)
+        model = re.search(r"model:\s*(.+)", info)
+        percent = re.search(r"percentage:\s*(\d+)%", info)
+        if model and percent:
+            levels[model.group(1).strip()] = int(percent.group(1))
     return levels
 
 
@@ -199,6 +236,8 @@ class XINPUT_BATTERY(ctypes.Structure):
 
 def controller_batteries():
     """Xbox-style controllers: {name: approximate percent}. XInput only reports four levels."""
+    if not IS_WINDOWS:
+        return {}  # upower lists them with the other devices
     try:
         xinput = ctypes.windll.xinput1_4
     except OSError:
@@ -260,8 +299,9 @@ class SystemStats(QObject):
         self.net_last = (now, io.bytes_recv, io.bytes_sent)
         rows.append(row("Network", f"↓ {fmt_bytes((io.bytes_recv - recv) / elapsed, True)}   "
                                    f"↑ {fmt_bytes((io.bytes_sent - sent) / elapsed, True)}"))
-        disk = psutil.disk_usage("C:\\")
-        rows.append(row("Disk C:", f"{fmt_bytes(disk.free)} free", disk.percent / 100))
+        disk = psutil.disk_usage(ROOT_DISK)
+        rows.append(row("Disk C:" if IS_WINDOWS else "Disk", f"{fmt_bytes(disk.free)} free", disk.percent / 100,
+                        group="Disk C:"))
 
         rows.append(row("Uptime", fmt_duration(time.time() - psutil.boot_time())))
         self.updates.poll()
@@ -271,7 +311,10 @@ class SystemStats(QObject):
             updates = "Checking…"
         else:
             updates = "Up to date" if self.updates.value == 0 else f"{self.updates.value} waiting"
-        rows.append(row("Updates", updates + "  ›", action="ms-settings:windowsupdate"))
+        if IS_WINDOWS:
+            rows.append(row("Updates", updates + "  ›", action="ms-settings:windowsupdate"))
+        else:
+            rows.append(row("Updates", updates))
 
         battery = psutil.sensors_battery()
         if battery:

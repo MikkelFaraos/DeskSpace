@@ -4,15 +4,20 @@ import ctypes
 from ctypes import wintypes
 
 from PySide6.QtCore import QRect, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
+from PySide6.QtGui import QColor, QCursor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from . import dialogs
 from .common import APP_NAME, DEFAULT_COLOR, DEFAULT_TITLE_SIZE, EDGE
-from .win32 import (
-    SNAP_GAP, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_MOVING, WM_SIZING, cursor_pos,
-    pin_to_desktop, snap_moving, snap_sizing, user32, work_area,
+from .system import (
+    IS_WINDOWS, SNAP_GAP, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_MOVING, WM_SIZING, pin_to_desktop, snap_moving,
+    snap_sizing, user32, work_area,
 )
+
+if IS_WINDOWS:
+    from .system import cursor_pos
+else:
+    from .system import Rect
 
 
 class Panel(QWidget):
@@ -35,6 +40,7 @@ class Panel(QWidget):
         self.full_h = data.get("h", self.default_size[1])
         self.drop_hover = False
         self.drag_start = None
+        self.manual_drag = None  # Linux: (edges, geometry and cursor when the drag began)
 
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setMouseTracking(True)
@@ -148,6 +154,9 @@ class Panel(QWidget):
         return e
 
     def mouseMoveEvent(self, e):
+        if self.manual_drag:
+            self.drag_to(QCursor.pos())
+            return
         edges = self.edges_at(e.position().toPoint())
         horiz = bool(edges & (Qt.LeftEdge | Qt.RightEdge))
         vert = bool(edges & (Qt.TopEdge | Qt.BottomEdge))
@@ -227,7 +236,49 @@ class Panel(QWidget):
         return False, 0
 
     def cursor_pos(self):
-        return cursor_pos()
+        return cursor_pos() if IS_WINDOWS else QCursor.pos()
+
+    def drag_to(self, cursor):
+        """Linux has no message to adjust a window-manager drag with, so we move the window ourselves."""
+        edges, start, start_cursor = self.manual_drag
+        r = Rect.of(start)
+        dx, dy = cursor.x() - start_cursor.x(), cursor.y() - start_cursor.y()
+        side = 0
+        if edges == Qt.Edge(0):
+            r.left, r.right, r.top, r.bottom = r.left + dx, r.right + dx, r.top + dy, r.bottom + dy
+            self.set_merge_target(self.app.merge_target_at(self, cursor))
+        else:
+            left, right = bool(edges & Qt.LeftEdge), bool(edges & Qt.RightEdge)
+            top, bottom = bool(edges & Qt.TopEdge), bool(edges & Qt.BottomEdge)
+            side = (1 if left else 2 if right else 0) + (6 if bottom else 3 if top else 0)  # WMSZ_* codes
+            r.left += dx if left else 0
+            r.right += dx if right else 0
+            r.top += dy if top else 0
+            r.bottom += dy if bottom else 0
+        if self.app.snap:
+            others = [Rect.of(f.geometry()) for f in self.app.fences if f is not self and f.isVisible()]
+            snap = (lambda *a: snap_moving(r, *a)) if not side else (lambda *a: snap_sizing(r, side, *a))
+            snap(work_area(r), others, self.app.snap_distance, SNAP_GAP)
+        if side:
+            if r.right - r.left < self.minimumWidth():
+                if side in (1, 4, 7):
+                    r.left = r.right - self.minimumWidth()
+                else:
+                    r.right = r.left + self.minimumWidth()
+            if r.bottom - r.top < self.minimumHeight():
+                if side in (3, 4, 5):
+                    r.top = r.bottom - self.minimumHeight()
+                else:
+                    r.bottom = r.top + self.minimumHeight()
+        self.setGeometry(r.left, r.top, r.right - r.left, r.bottom - r.top)
+
+    def mouseReleaseEvent(self, e):
+        if self.manual_drag:
+            self.manual_drag = None
+            target = self.merge_target
+            self.set_merge_target(None)
+            if target is not None:
+                QTimer.singleShot(0, lambda: self.app.merge(self, target))
 
     def set_merge_target(self, target):
         if target is self.merge_target:
@@ -246,9 +297,13 @@ class Panel(QWidget):
             return
         pos = e.position().toPoint()
         edges = self.edges_at(pos)
-        if edges != Qt.Edge(0):
+        movable = (pos.y() < self.title_h or self.drag_anywhere) and not self.app.locked
+        if not IS_WINDOWS:
+            if edges != Qt.Edge(0) or movable:
+                self.manual_drag = (edges, self.geometry(), QCursor.pos())
+        elif edges != Qt.Edge(0):
             self.windowHandle().startSystemResize(edges)
-        elif (pos.y() < self.title_h or self.drag_anywhere) and not self.app.locked:
+        elif movable:
             self.windowHandle().startSystemMove()
 
     def mouseDoubleClickEvent(self, e):
@@ -327,3 +382,8 @@ class Panel(QWidget):
             self.custom_color = True
             self.update()
             self.app.schedule_save()
+
+
+if not IS_WINDOWS:
+    # It reads Windows messages; without this Qt would call it for every X11 event for nothing.
+    del Panel.nativeEvent
