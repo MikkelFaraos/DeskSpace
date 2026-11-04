@@ -9,7 +9,7 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -31,7 +31,9 @@ jobs:
         shell: pwsh
         run: |
           $setup = Get-ChildItem dist\DeskSpace-Setup-*.exe | Select-Object -First 1
-          Start-Process $setup.FullName -ArgumentList "/SILENT", "/SUPPRESSMSGBOXES" -Wait
+          # Only the setup: Start-Process -Wait would also wait for the app it starts.
+          $run = Start-Process $setup.FullName -ArgumentList "/SILENT", "/SUPPRESSMSGBOXES" -PassThru
+          if (-not $run.WaitForExit(180000)) { throw "the setup didn't finish" }
           Start-Sleep -Seconds 15
           Get-Process DeskSpace
           Stop-Process -Name DeskSpace
