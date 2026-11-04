@@ -31,6 +31,7 @@ from .preview import PreviewController
 from .search import HotkeyListener, SearchPopup
 from .sysinfo import SystemStats
 from .tabs import TabGroup
+from .updates import Updater
 from .wallpaper import WallpaperWatcher
 from .widgets import ClockFence, MonitorFence, NoteFence, TodoFence
 from .system import (
@@ -51,7 +52,7 @@ OPTIONS = {"locked": False, "snap": True, "snap_distance": 16, "quick_hide": Tru
            "match_wallpaper": True, "previews": True, "search_enabled": True, "search_hotkey": "Ctrl+Shift+Space",
            "pet_enabled": True, "pets": [], "pet_outfits": True, "pet_meetings": True, "track_key": "",
            "keep_delivered_days": 2, "tidy_auto": False, "tidy_days": 2, "tidy_last": 0,
-           "console_autostart": False}
+           "console_autostart": False, "update_check": True}
 PET_NAMES = ["Mochi", "Biscuit", "Pickles", "Nugget", "Pebble", "Clover", "Waffles", "Hazel", "Peanut", "Bramble",
              "Tofu", "Maple", "Juniper", "Muffin", "Pip", "Sprout"]
 # Files still being written by a browser or Office; rules leave them alone until they're final.
@@ -125,6 +126,7 @@ class DeskSpace:
         QTimer.singleShot(60000, self.daily_tidy)
         if self.console_autostart:
             QTimer.singleShot(2500, self.enter_console)
+        self.updater = Updater(self)
         # Monitors can still be coming up at login; only rescue off-screen fences once they're settled.
         QTimer.singleShot(15000, self.rescue_offscreen)
 
@@ -162,9 +164,12 @@ class DeskSpace:
         self.hide_action = menu.addAction("Hide fences", self.toggle_hidden)
         menu.addSeparator()
         menu.addAction("Settings…", self.open_settings)
+        self.update_action = menu.addAction("Install update…", lambda: self.updater.install())
+        self.update_action.setVisible(False)
         menu.addAction("Quit", self.quit)
         self.tray_menu = menu
         self.tray.setContextMenu(menu)
+        self.tray.messageClicked.connect(lambda: self.updater.install())
         self.tray.activated.connect(
             lambda reason: self.toggle_hidden() if reason == QSystemTrayIcon.DoubleClick else None)
         self.tray.show()
