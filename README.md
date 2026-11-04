@@ -107,7 +107,7 @@ It asks for your password to install a few system packages, then installs the ap
 
 The Linux version has been tested automatically on Ubuntu with a basic window manager, but not yet by hand on the full Ubuntu or Mint desktops. It differs from Windows in a few ways:
 
-- **Fences** stay behind other windows, but "Show desktop" may hide them, and they may stay on one workspace.
+- **Fences** stay behind other windows and appear on every workspace. "Show desktop" may hide them on desktops where a file manager draws the icons.
 - **Not available:** double-clicking the desktop to hide fences, hiding the desktop icons, the global search shortcut, GOG games, and GPU load and VRAM. Use the tray icon to hide fences and open search.
 - **File previews** cover image files only.
 - **File search** needs `locate`, media controls need `playerctl`, and battery levels need `upower`. The install script adds all three.

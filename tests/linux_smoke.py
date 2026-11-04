@@ -124,6 +124,8 @@ def steps():
     log.append("     window manager state: " + " | ".join(l for l in state.splitlines() if "_NET_WM_STATE" in l
                                                          or "WINDOW_TYPE" in l))
     check("_NET_WM_STATE_BELOW" in state, "the window manager keeps fences below other windows")
+    check("_NET_WM_DESKTOP(CARDINAL) = 4294967295" in state, "fences are on every workspace")
+    check("_NET_WM_WINDOW_TYPE_DESKTOP" in state, "fences sit in the desktop layer")
     shot("01_desktop")
 
     # Moving, snapping and resizing, driven through the same code as a real mouse drag
